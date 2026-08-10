@@ -1,0 +1,16 @@
+# dependencies and generated Next.js output
+node_modules/
+.next/
+out/
+
+# local environment files (keep the safe template in version control)
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# local logs
+*.log
+
+# TypeScript build metadata
+*.tsbuildinfo

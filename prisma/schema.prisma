@@ -1,0 +1,213 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  CLIENT
+  PROFESSIONAL
+  ADMIN
+}
+
+enum ProfessionalType {
+  IMMIGRATION_LAWYER
+  ACCREDITED_ADVISER
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum CredentialStatus {
+  PENDING
+  VERIFIED
+  EXPIRED
+  REVOKED
+}
+
+enum ConsultationStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  CANCELLED
+  COMPLETED
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+}
+
+model User {
+  id                          String                @id @default(cuid())
+  email                       String                @unique
+  name                        String
+  role                        UserRole              @default(CLIENT)
+  createdAt                   DateTime              @default(now())
+  updatedAt                   DateTime              @updatedAt
+  professionalProfile         ProfessionalProfile?
+  consultationRequests        ConsultationRequest[] @relation("ClientRequests")
+  reviews                     Review[]              @relation("ClientReviews")
+  notifications               Notification[]
+}
+
+model ProfessionalProfile {
+  id                          String                @id @default(cuid())
+  userId                      String                @unique
+  professionalType            ProfessionalType
+  bio                         String                @db.Text
+  location                    String
+  yearsOfExperience           Int
+  verificationStatus          VerificationStatus    @default(PENDING)
+  rating                      Decimal               @default(0) @db.Decimal(3, 2)
+  reviewCount                 Int                   @default(0)
+  completedCases              Int                   @default(0)
+  createdAt                   DateTime              @default(now())
+  updatedAt                   DateTime              @updatedAt
+  user                        User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  services                    ProfessionalService[]
+  countries                   ProfessionalCountry[]
+  languages                   ProfessionalLanguage[]
+  credentials                 Credential[]
+  consultationRequests        ConsultationRequest[]
+  reviews                     Review[]
+
+  @@index([verificationStatus])
+  @@index([professionalType])
+}
+
+model Country {
+  id                          String                @id @default(cuid())
+  name                        String                @unique
+  code                        String                @unique @db.Char(2)
+  createdAt                   DateTime              @default(now())
+  professionalCountries       ProfessionalCountry[]
+  consultationRequests        ConsultationRequest[]
+}
+
+model ImmigrationService {
+  id                          String                @id @default(cuid())
+  name                        String                @unique
+  description                 String                @db.Text
+  createdAt                   DateTime              @default(now())
+  professionalServices        ProfessionalService[]
+  consultationRequests        ConsultationRequest[]
+}
+
+model ProfessionalService {
+  id                          String                @id @default(cuid())
+  professionalId              String
+  serviceId                   String
+  price                       Decimal               @db.Decimal(10, 2)
+  durationMinutes             Int
+  description                 String                @db.Text
+  professional                ProfessionalProfile   @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  service                     ImmigrationService    @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+
+  @@unique([professionalId, serviceId])
+  @@index([serviceId])
+}
+
+model ProfessionalCountry {
+  professionalId              String
+  countryId                   String
+  professional                ProfessionalProfile   @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  country                     Country                @relation(fields: [countryId], references: [id], onDelete: Restrict)
+
+  @@id([professionalId, countryId])
+  @@index([countryId])
+}
+
+model ProfessionalLanguage {
+  professionalId              String
+  language                    String
+  professional                ProfessionalProfile   @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  @@id([professionalId, language])
+}
+
+model Credential {
+  id                          String                @id @default(cuid())
+  professionalId              String
+  credentialType              String
+  issuingAuthority            String
+  credentialNumber            String
+  status                      CredentialStatus      @default(PENDING)
+  createdAt                   DateTime              @default(now())
+  professional                ProfessionalProfile   @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  @@unique([issuingAuthority, credentialNumber])
+  @@index([professionalId, status])
+}
+
+model ConsultationRequest {
+  id                          String                @id @default(cuid())
+  clientId                    String
+  professionalId              String
+  countryId                   String
+  serviceId                   String
+  description                 String                @db.Text
+  preferredLanguage           String
+  preferredDateTime           DateTime?
+  status                      ConsultationStatus    @default(PENDING)
+  createdAt                   DateTime              @default(now())
+  updatedAt                   DateTime              @updatedAt
+  client                      User                  @relation("ClientRequests", fields: [clientId], references: [id], onDelete: Restrict)
+  professional                ProfessionalProfile   @relation(fields: [professionalId], references: [id], onDelete: Restrict)
+  country                     Country                @relation(fields: [countryId], references: [id], onDelete: Restrict)
+  service                     ImmigrationService    @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  appointment                 Appointment?
+  review                      Review?
+
+  @@index([clientId, status])
+  @@index([professionalId, status])
+  @@index([countryId, serviceId])
+}
+
+model Appointment {
+  id                          String                @id @default(cuid())
+  consultationRequestId       String                @unique
+  scheduledAt                 DateTime
+  durationMinutes             Int
+  status                      AppointmentStatus     @default(SCHEDULED)
+  createdAt                   DateTime              @default(now())
+  updatedAt                   DateTime              @updatedAt
+  consultationRequest         ConsultationRequest   @relation(fields: [consultationRequestId], references: [id], onDelete: Cascade)
+
+  @@index([scheduledAt])
+}
+
+model Review {
+  id                          String                @id @default(cuid())
+  clientId                    String
+  professionalId              String
+  consultationRequestId       String                @unique
+  rating                      Int
+  comment                     String                @db.Text
+  createdAt                   DateTime              @default(now())
+  client                      User                  @relation("ClientReviews", fields: [clientId], references: [id], onDelete: Restrict)
+  professional                ProfessionalProfile   @relation(fields: [professionalId], references: [id], onDelete: Restrict)
+  consultationRequest         ConsultationRequest   @relation(fields: [consultationRequestId], references: [id], onDelete: Cascade)
+
+  @@index([professionalId, createdAt])
+  @@index([clientId])
+}
+
+model Notification {
+  id                          String                @id @default(cuid())
+  userId                      String
+  type                        String
+  title                       String
+  message                     String                @db.Text
+  readAt                      DateTime?
+  createdAt                   DateTime              @default(now())
+  user                        User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+}
