@@ -1,11 +1,55 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import type { Professional } from "../lib/professionals";
+import type { Professional } from "../lib/professional-data";
 
 export function ConsultationRequest({ professional, service }: { professional: Professional; service?: string }) {
-  const [open, setOpen] = useState(false); const [sent, setSent] = useState(false);
-  function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); setSent(true); }
-  return <><button onClick={() => { setOpen(true); setSent(false); }} className="rounded-lg bg-ocean px-5 py-3 font-semibold text-white hover:bg-[#0f5b7d]">Request a consultation</button>{open && <div role="dialog" aria-modal="true" aria-labelledby="request-title" className="fixed inset-0 z-50 grid overflow-y-auto bg-ink/55 p-4 sm:place-items-center"><div className="my-auto w-full max-w-2xl rounded-2xl bg-white p-5 shadow-xl sm:p-7"><div className="flex items-start justify-between gap-4"><div><p className="text-sm font-bold uppercase tracking-[.15em] text-ocean">Consultation request</p><h2 id="request-title" className="mt-1 text-2xl font-bold">Contact {professional.name}</h2></div><button onClick={() => setOpen(false)} aria-label="Close request form" className="text-2xl text-slate-500">×</button></div>{sent ? <div className="mt-6 rounded-xl bg-[#EDF7F7] p-6"><h3 className="text-lg font-bold">Request prepared</h3><p className="mt-2 leading-6 text-slate-600">This prototype does not send messages yet. In a future version, this request would be shared with {professional.name}.</p><button onClick={() => setOpen(false)} className="mt-5 rounded-lg bg-ink px-4 py-2.5 font-semibold text-white">Close</button></div> : <form onSubmit={submit} className="mt-6 grid gap-4 sm:grid-cols-2"><Field label="Client name" required /><Field label="Email" type="email" required /><Field label="Destination country" defaultValue={professional.country} required /><label className="text-sm font-semibold">Immigration matter / service<select defaultValue={service ?? ""} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2.5 font-normal"><option value="">Select a service</option>{professional.specializations.map(item => <option key={item}>{item}</option>)}</select></label><label className="text-sm font-semibold">Preferred consultation language<select className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2.5 font-normal"><option value="">Select a language</option>{professional.languages.map(item => <option key={item}>{item}</option>)}</select></label><Field label="Preferred date/time (optional)" type="datetime-local" /><label className="sm:col-span-2 text-sm font-semibold">Tell us briefly about your situation<textarea required rows={4} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2.5 font-normal" placeholder="Share the key details you would like to discuss." /></label><p className="sm:col-span-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">This is a request for consultation. No payment is processed in this MVP.</p><div className="sm:col-span-2 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button type="button" onClick={() => setOpen(false)} className="rounded-lg border border-slate-300 px-4 py-2.5 font-semibold">Cancel</button><button className="rounded-lg bg-ocean px-4 py-2.5 font-semibold text-white">Send request</button></div></form>}</div></div>}</>;
+  const [open, setOpen] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  function openForm() {
+    setOpen(true);
+    setSent(false);
+    setError("");
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setIsSubmitting(true);
+
+    const form = new FormData(event.currentTarget);
+    try {
+      const response = await fetch("/api/consultation-requests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientName: form.get("clientName"),
+          email: form.get("email"),
+          professionalId: professional.profileId,
+          countryName: form.get("countryName"),
+          serviceName: form.get("serviceName"),
+          preferredLanguage: form.get("preferredLanguage"),
+          preferredDateTime: form.get("preferredDateTime"),
+          description: form.get("description"),
+          professionalName: professional.name,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "We could not save your request. Please try again.");
+      setSent(true);
+    } catch (submissionError) {
+      setError(submissionError instanceof Error ? submissionError.message : "We could not save your request. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return <><button onClick={openForm} className="rounded-lg bg-ocean px-5 py-3 font-semibold text-white hover:bg-[#0f5b7d]">Request a consultation</button>{open && <div role="dialog" aria-modal="true" aria-labelledby="request-title" className="fixed inset-0 z-50 grid overflow-y-auto bg-ink/55 p-4 sm:place-items-center"><div className="my-auto w-full max-w-2xl rounded-2xl bg-white p-5 shadow-xl sm:p-7"><div className="flex items-start justify-between gap-4"><div><p className="text-sm font-bold uppercase tracking-[.15em] text-ocean">Consultation request</p><h2 id="request-title" className="mt-1 text-2xl font-bold">Contact {professional.name}</h2></div><button onClick={() => setOpen(false)} aria-label="Close request form" className="text-2xl text-slate-500">×</button></div>{sent ? <div className="mt-6 rounded-xl bg-[#EDF7F7] p-6"><h3 className="text-lg font-bold">Request sent</h3><p className="mt-2 leading-6 text-slate-600">Your consultation request has been saved and is pending review by {professional.name}.</p><button onClick={() => setOpen(false)} className="mt-5 rounded-lg bg-ink px-4 py-2.5 font-semibold text-white">Close</button></div> : <form onSubmit={submit} className="mt-6 grid gap-4 sm:grid-cols-2"><Field label="Client name" name="clientName" required /><Field label="Email" name="email" type="email" required /><Field label="Destination country" name="countryName" defaultValue={professional.country} required /><label className="text-sm font-semibold">Immigration matter / service<select name="serviceName" defaultValue={service ?? ""} required className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2.5 font-normal"><option value="">Select a service</option>{professional.specializations.map(item => <option key={item}>{item}</option>)}</select></label><label className="text-sm font-semibold">Preferred consultation language<select name="preferredLanguage" required className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2.5 font-normal"><option value="">Select a language</option>{professional.languages.map(item => <option key={item}>{item}</option>)}</select></label><Field label="Preferred date/time (optional)" name="preferredDateTime" type="datetime-local" /><label className="sm:col-span-2 text-sm font-semibold">Tell us briefly about your situation<textarea name="description" required rows={4} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2.5 font-normal" placeholder="Share the key details you would like to discuss." /></label>{error && <p role="alert" className="sm:col-span-2 rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}<p className="sm:col-span-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">This is a request for consultation. No payment is processed in this MVP.</p><div className="sm:col-span-2 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button type="button" onClick={() => setOpen(false)} disabled={isSubmitting} className="rounded-lg border border-slate-300 px-4 py-2.5 font-semibold disabled:cursor-not-allowed disabled:opacity-60">Cancel</button><button disabled={isSubmitting} className="rounded-lg bg-ocean px-4 py-2.5 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">{isSubmitting ? "Sending…" : "Send request"}</button></div></form>}</div></div>}</>;
 }
-function Field({label,type="text",defaultValue,required=false}:{label:string;type?:string;defaultValue?:string;required?:boolean}) { return <label className="text-sm font-semibold">{label}<input type={type} defaultValue={defaultValue} required={required} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2.5 font-normal" /></label> }
+
+function Field({ label, name, type = "text", defaultValue, required = false }: { label: string; name: string; type?: string; defaultValue?: string; required?: boolean }) {
+  return <label className="text-sm font-semibold">{label}<input name={name} type={type} defaultValue={defaultValue} required={required} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2.5 font-normal" /></label>;
+}
