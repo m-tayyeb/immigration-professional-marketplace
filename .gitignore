@@ -1,6 +1,7 @@
 # dependencies and generated Next.js output
 node_modules/
 .next/
+.next-dev/
 out/
 
 # local environment files (keep the safe template in version control)
@@ -17,3 +18,5 @@ out/
 
 .vercel
 .env*
+!.env.example
+.private-uploads/

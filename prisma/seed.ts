@@ -1,5 +1,6 @@
 import { PrismaClient, ProfessionalType, UserRole, VerificationStatus } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { hashPassword } from "../lib/password";
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -68,14 +69,25 @@ async function main() {
     ["Student Visa", "Support for study-based immigration applications."], ["Work Visa", "Guidance for employment-based immigration routes."], ["Family Reunification", "Support for family residence applications."], ["Residence Permit", "Advice for temporary and long-term residence permits."], ["Permanent Residence", "Planning and support for permanent residence routes."], ["Citizenship", "Naturalisation and citizenship application guidance."], ["Business Immigration", "Immigration support for founders and entrepreneurs."],
   ].map(([name, description]) => prisma.immigrationService.upsert({ where: { name }, update: { description }, create: { name, description } })));
 
+  await Promise.all([
+    { code: "FIRST_RESIDENCE_PERMIT", name: "First Residence Permit", description: "Assessment and end-to-end support for a first Finnish residence permit.", totalPrice: 500 },
+    { code: "RESIDENCE_PERMIT_RENEWAL", name: "Residence Permit Renewal", description: "Assessment and end-to-end support for renewing a Finnish residence permit.", totalPrice: 500 },
+    { code: "OTHER", name: "Other", description: "Assessment for immigration, integration, licensing, or social-benefit guidance.", totalPrice: null },
+  ].map((service) => prisma.immigrationService.upsert({
+    where: { code: service.code },
+    update: { ...service, assessmentFee: 100, active: true },
+    create: { ...service, assessmentFee: 100, active: true },
+  })));
+
   const countryByCode = new Map(countries.map((country) => [country.code, country]));
   const serviceByName = new Map(services.map((service) => [service.name, service]));
 
   for (const seedProfessional of professionals) {
+    const passwordHash = await hashPassword("Professional123!");
     const user = await prisma.user.upsert({
       where: { email: seedProfessional.email },
       update: { name: seedProfessional.name, role: UserRole.PROFESSIONAL },
-      create: { email: seedProfessional.email, name: seedProfessional.name, role: UserRole.PROFESSIONAL },
+      create: { email: seedProfessional.email, name: seedProfessional.name, role: UserRole.PROFESSIONAL, passwordHash },
     });
 
     const profile = await prisma.professionalProfile.upsert({
@@ -122,7 +134,11 @@ async function main() {
     }
   }
 
-  await prisma.user.upsert({ where: { email: "client@example.test" }, update: { name: "Sample Client", role: UserRole.CLIENT }, create: { email: "client@example.test", name: "Sample Client", role: UserRole.CLIENT } });
+  await prisma.user.upsert({
+    where: { email: "client@example.test" },
+    update: {},
+    create: { email: "client@example.test", name: "Demo Client", role: UserRole.CLIENT, passwordHash: await hashPassword("Client123!") },
+  });
 }
 
 main().then(() => prisma.$disconnect()).catch(async (error) => { console.error(error); await prisma.$disconnect(); process.exit(1); });
