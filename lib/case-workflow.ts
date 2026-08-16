@@ -15,6 +15,8 @@ export const matters: { value: MatterType; label: string }[] = [
 ];
 
 export const statusLabels: Record<CaseStatus, string> = {
+  AWAITING_ASSESSMENT_REVIEW: "Awaiting professional review",
+  ASSESSMENT_REQUEST_DECLINED: "Assessment request declined",
   AWAITING_ASSESSMENT_PAYMENT: "Awaiting assessment payment",
   ASSESSMENT_PAID: "Assessment queued",
   ASSESSMENT_IN_PROGRESS: "Assessment in progress",
@@ -30,6 +32,18 @@ export const statusLabels: Record<CaseStatus, string> = {
 export function manualStatusTransitions(status: CaseStatus, assessmentPaid: boolean): CaseStatus[] {
   if (status === "ASSESSMENT_PAID" && assessmentPaid) return ["ASSESSMENT_IN_PROGRESS"];
   return [];
+}
+
+export function assessmentRequestDecisionStatus(
+  status: CaseStatus,
+  decision: "APPROVE" | "DECLINE",
+): CaseStatus | null {
+  if (status !== "AWAITING_ASSESSMENT_REVIEW") return null;
+  return decision === "APPROVE" ? "AWAITING_ASSESSMENT_PAYMENT" : "ASSESSMENT_REQUEST_DECLINED";
+}
+
+export function canPayAssessmentFee(status: CaseStatus) {
+  return status === "AWAITING_ASSESSMENT_PAYMENT";
 }
 
 export function canManuallyTransitionCaseStatus(
@@ -79,12 +93,16 @@ export function progressFromChecklist(items: { completedAt: Date | null }[]) {
 
 export function nextAction(status: CaseStatus, role: "CLIENT" | "PROFESSIONAL" | "ADMIN") {
   if (role === "CLIENT") {
+    if (status === "AWAITING_ASSESSMENT_REVIEW") return "Wait for the professional to review your assessment request";
+    if (status === "ASSESSMENT_REQUEST_DECLINED") return "This assessment request was declined";
     if (status === "AWAITING_ASSESSMENT_PAYMENT") return "Pay the €100 assessment fee";
     if (status === "AWAITING_CLIENT_DECISION") return "Confirm whether you want to proceed";
     if (status === "AWAITING_DOCUMENTS_AND_PAYMENT") return "Upload requested documents and pay the balance";
     if (status === "COMPLETED") return "Review your released documents";
     return "Wait for the professional's next update";
   }
+  if (status === "AWAITING_ASSESSMENT_REVIEW") return "Approve or decline the assessment request";
+  if (status === "ASSESSMENT_REQUEST_DECLINED") return "No further assessment action is available";
   if (status === "ASSESSMENT_PAID") return "Start the assessment";
   if (status === "ASSESSMENT_IN_PROGRESS") return "Complete the assessment";
   if (status === "AWAITING_DOCUMENTS_AND_PAYMENT") return "Review incoming documents and payment";

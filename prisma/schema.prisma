@@ -54,6 +54,8 @@ enum MatterType {
 }
 
 enum CaseStatus {
+  AWAITING_ASSESSMENT_REVIEW
+  ASSESSMENT_REQUEST_DECLINED
   AWAITING_ASSESSMENT_PAYMENT
   ASSESSMENT_PAID
   ASSESSMENT_IN_PROGRESS
@@ -283,7 +285,7 @@ model Case {
   serviceId         String
   matterType        MatterType          @default(IMMIGRATION)
   matterDescription String?             @db.Text
-  status            CaseStatus          @default(AWAITING_ASSESSMENT_PAYMENT)
+  status            CaseStatus          @default(AWAITING_ASSESSMENT_REVIEW)
   clientAgreedAt    DateTime?
   createdAt         DateTime            @default(now())
   updatedAt         DateTime            @updatedAt

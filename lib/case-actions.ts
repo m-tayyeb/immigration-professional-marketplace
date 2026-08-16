@@ -9,7 +9,7 @@ import { redirect } from "next/navigation";
 import { auth } from "../auth";
 import { paymentGateway } from "./payments";
 import { prisma } from "./prisma";
-import { canConfirmRequestedDocuments, canManuallyTransitionCaseStatus, canRequestRemainingPayment, completedChecklistTitleAfterPayment, requestedDocumentsReceivedTitle, statusAfterPayment } from "./case-workflow";
+import { assessmentRequestDecisionStatus, canConfirmRequestedDocuments, canManuallyTransitionCaseStatus, canPayAssessmentFee, canRequestRemainingPayment, completedChecklistTitleAfterPayment, requestedDocumentsReceivedTitle, statusAfterPayment } from "./case-workflow";
 import { caseAccessWhere, professionalEligibilityWhere, selectProfessionalForAssignment } from "./professional-assignment";
 
 async function sessionUser() {
@@ -49,8 +49,7 @@ export async function createCase(formData: FormData) {
   const created = await prisma.case.create({
     data: {
       clientId: user.id, professionalId: professional.id, countryId, serviceId,
-      matterType, matterDescription: matterDescription || null,
-      payments: { create: { stage: "ASSESSMENT", amount: service.assessmentFee } },
+      matterType, matterDescription: matterDescription || null, status: "AWAITING_ASSESSMENT_REVIEW",
       checklist: { create: [
         { title: "Assessment completed", position: 1 },
         { title: "Client confirms they want to proceed", clientAction: true, position: 2 },
@@ -60,7 +59,7 @@ export async function createCase(formData: FormData) {
         { title: "Main work completed", position: 6 },
         { title: "Professional documents prepared and released", position: 7 },
       ] },
-      timeline: { create: { title: "Case created", details: "Assessment payment is due." } },
+      timeline: { create: { title: "Assessment requested", details: "The professional will review the initial request before payment is requested." } },
     },
   });
   redirect(`/cases/${created.id}`);
@@ -73,12 +72,48 @@ export async function payRequest(formData: FormData) {
   if (user.role !== "CLIENT") throw new Error("Only the client can make this payment.");
   const payment = record.payments.find((item) => item.id === paymentId && item.status === "PENDING");
   if (!payment) throw new Error("Payment request is not available.");
+  if (payment.stage === "ASSESSMENT" && !canPayAssessmentFee(record.status)) throw new Error("The assessment must be approved by the professional before payment.");
   await paymentGateway.markPaid(payment.id);
   if (payment.stage === "ASSESSMENT") {
     await prisma.case.update({ where: { id: caseId }, data: { status: statusAfterPayment(payment.stage), timeline: { create: { title: "Assessment fee paid", details: "The professional can begin the assessment." } } } });
   } else {
     await prisma.case.update({ where: { id: caseId }, data: { status: statusAfterPayment(payment.stage), checklist: { updateMany: { where: { title: completedChecklistTitleAfterPayment(payment.stage) ?? undefined }, data: { completedAt: new Date() } } }, timeline: { create: { title: "Remaining balance paid" } } } });
   }
+  revalidatePath(`/cases/${caseId}`);
+  revalidatePath("/dashboard");
+}
+
+export async function approveAssessmentRequest(formData: FormData) {
+  const caseId = String(formData.get("caseId") ?? "");
+  const { user, record } = await ownedCase(caseId);
+  if (user.role === "CLIENT") throw new Error("Professional access required.");
+  const nextStatus = assessmentRequestDecisionStatus(record.status, "APPROVE");
+  if (!nextStatus) throw new Error("This assessment request cannot be approved.");
+  await prisma.$transaction(async (tx) => {
+    const updated = await tx.case.updateMany({ where: { id: caseId, status: "AWAITING_ASSESSMENT_REVIEW" }, data: { status: nextStatus } });
+    if (updated.count !== 1) throw new Error("This assessment request has already been decided.");
+    await tx.paymentRequest.create({ data: { caseId, stage: "ASSESSMENT", amount: record.service.assessmentFee } });
+    await tx.caseTimelineEvent.create({ data: { caseId, title: "Assessment request approved", details: "The €100 assessment payment is now due." } });
+  });
+  revalidatePath(`/professional/cases/${caseId}`);
+  revalidatePath(`/cases/${caseId}`);
+  revalidatePath("/dashboard");
+}
+
+export async function declineAssessmentRequest(formData: FormData) {
+  const caseId = String(formData.get("caseId") ?? "");
+  const { user, record } = await ownedCase(caseId);
+  if (user.role === "CLIENT") throw new Error("Professional access required.");
+  const nextStatus = assessmentRequestDecisionStatus(record.status, "DECLINE");
+  if (!nextStatus) throw new Error("This assessment request cannot be declined.");
+  const declinedAt = new Date();
+  await prisma.$transaction(async (tx) => {
+    const updated = await tx.case.updateMany({ where: { id: caseId, status: "AWAITING_ASSESSMENT_REVIEW" }, data: { status: nextStatus, completedAt: declinedAt } });
+    if (updated.count !== 1) throw new Error("This assessment request has already been decided.");
+    await tx.paymentRequest.updateMany({ where: { caseId, stage: "ASSESSMENT", status: "PENDING" }, data: { status: "CANCELLED" } });
+    await tx.caseTimelineEvent.create({ data: { caseId, title: "Assessment request declined", details: "No assessment payment is due and assessment work will not begin." } });
+  });
+  revalidatePath(`/professional/cases/${caseId}`);
   revalidatePath(`/cases/${caseId}`);
   revalidatePath("/dashboard");
 }
