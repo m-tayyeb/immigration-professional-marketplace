@@ -9,6 +9,7 @@ import { redirect } from "next/navigation";
 import { auth } from "../auth";
 import { paymentGateway } from "./payments";
 import { prisma } from "./prisma";
+import { canManuallyTransitionCaseStatus } from "./case-workflow";
 
 async function sessionUser() {
   const session = await auth();
@@ -178,8 +179,10 @@ export async function updateCaseStatus(formData: FormData) {
   const status = String(formData.get("status") ?? "") as CaseStatus;
   const { user, record } = await ownedCase(caseId);
   if (user.role === "CLIENT") throw new Error("Professional access required.");
-  if (status === "AWAITING_CLIENT_DECISION" && !record.assessment?.releasedAt) throw new Error("Release the assessment to move the case to Awaiting your decision.");
-  if (status === "AWAITING_DOCUMENTS_AND_PAYMENT" && record.assessment?.clientDecision !== "PROCEED") throw new Error("The client must choose to proceed first.");
+  const assessmentPaid = record.payments.some((payment) => payment.stage === "ASSESSMENT" && payment.status === "PAID");
+  if (!canManuallyTransitionCaseStatus(record.status, status, assessmentPaid)) {
+    throw new Error("This case status transition is not available.");
+  }
   await prisma.case.update({ where: { id: caseId }, data: { status, completedAt: status === "COMPLETED" ? new Date() : null, timeline: { create: { title: `Status changed to ${status.replaceAll("_", " ").toLowerCase()}` } } } });
   revalidatePath(`/professional/cases/${caseId}`);
   revalidatePath(`/cases/${caseId}`);

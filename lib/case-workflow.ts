@@ -26,6 +26,19 @@ export const statusLabels: Record<CaseStatus, string> = {
   CANCELLED: "Cancelled",
 };
 
+export function manualStatusTransitions(status: CaseStatus, assessmentPaid: boolean): CaseStatus[] {
+  if (status === "ASSESSMENT_PAID" && assessmentPaid) return ["ASSESSMENT_IN_PROGRESS"];
+  return [];
+}
+
+export function canManuallyTransitionCaseStatus(
+  currentStatus: CaseStatus,
+  nextStatus: CaseStatus,
+  assessmentPaid: boolean,
+) {
+  return manualStatusTransitions(currentStatus, assessmentPaid).includes(nextStatus);
+}
+
 export function progressFromChecklist(items: { completedAt: Date | null }[]) {
   if (!items.length) return 0;
   return Math.round((items.filter((item) => item.completedAt).length / items.length) * 100);

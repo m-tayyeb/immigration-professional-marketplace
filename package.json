@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",
+    "test": "tsx --test lib/*.test.ts",
     "start": "next start",
     "lint": "next lint",
     "db:validate": "prisma validate",
