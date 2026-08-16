@@ -3,13 +3,13 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { AssessmentOutcome, CaseStatus, MatterType } from "@prisma/client";
+import { Prisma, type AssessmentOutcome, type CaseStatus, type MatterType } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { auth } from "../auth";
 import { paymentGateway } from "./payments";
 import { prisma } from "./prisma";
-import { canManuallyTransitionCaseStatus } from "./case-workflow";
+import { canConfirmRequestedDocuments, canManuallyTransitionCaseStatus, canRequestRemainingPayment, completedChecklistTitleAfterPayment, requestedDocumentsReceivedTitle, statusAfterPayment } from "./case-workflow";
 
 async function sessionUser() {
   const session = await auth();
@@ -21,7 +21,7 @@ async function ownedCase(caseId: string) {
   const user = await sessionUser();
   const record = await prisma.case.findFirst({
     where: user.role === "CLIENT" ? { id: caseId, clientId: user.id } : user.role === "PROFESSIONAL" ? { id: caseId, professional: { userId: user.id } } : { id: caseId },
-    include: { service: true, payments: true, assessment: true },
+    include: { service: true, payments: true, assessment: true, checklist: true, documents: true },
   });
   if (!record) throw new Error("Case not found or access denied.");
   return { user, record };
@@ -48,7 +48,7 @@ export async function createCase(formData: FormData) {
       checklist: { create: [
         { title: "Assessment completed", position: 1 },
         { title: "Client confirms they want to proceed", clientAction: true, position: 2 },
-        { title: "Requested client documents received", clientAction: true, position: 3 },
+        { title: requestedDocumentsReceivedTitle, position: 3 },
         { title: "Remaining balance paid", clientAction: true, position: 4 },
         { title: "Professional reviews client documents", position: 5 },
         { title: "Main work completed", position: 6 },
@@ -69,9 +69,9 @@ export async function payRequest(formData: FormData) {
   if (!payment) throw new Error("Payment request is not available.");
   await paymentGateway.markPaid(payment.id);
   if (payment.stage === "ASSESSMENT") {
-    await prisma.case.update({ where: { id: caseId }, data: { status: "ASSESSMENT_PAID", timeline: { create: { title: "Assessment fee paid", details: "The professional can begin the assessment." } } } });
+    await prisma.case.update({ where: { id: caseId }, data: { status: statusAfterPayment(payment.stage), timeline: { create: { title: "Assessment fee paid", details: "The professional can begin the assessment." } } } });
   } else {
-    await prisma.case.update({ where: { id: caseId }, data: { status: "DOCUMENT_REVIEW", checklist: { updateMany: { where: { title: "Remaining balance paid" }, data: { completedAt: new Date() } } }, timeline: { create: { title: "Remaining balance paid" } } } });
+    await prisma.case.update({ where: { id: caseId }, data: { status: statusAfterPayment(payment.stage), checklist: { updateMany: { where: { title: completedChecklistTitleAfterPayment(payment.stage) ?? undefined }, data: { completedAt: new Date() } } }, timeline: { create: { title: "Remaining balance paid" } } } });
   }
   revalidatePath(`/cases/${caseId}`);
   revalidatePath("/dashboard");
@@ -84,7 +84,7 @@ export async function agreeToProceed(formData: FormData) {
   const decidedAt = new Date();
   await prisma.$transaction([
     prisma.caseAssessment.update({ where: { caseId }, data: { clientDecision: "PROCEED", decidedAt } }),
-    prisma.case.update({ where: { id: caseId }, data: { clientAgreedAt: decidedAt, status: "AWAITING_DOCUMENTS_AND_PAYMENT", checklist: { updateMany: { where: { title: "Client confirms they want to proceed", clientAction: true }, data: { completedAt: decidedAt } } }, timeline: { create: { title: "Client chose to proceed", details: "The professional can now request documents and the remaining payment." } } } }),
+    prisma.case.update({ where: { id: caseId }, data: { clientAgreedAt: decidedAt, status: "AWAITING_DOCUMENTS_AND_PAYMENT", checklist: { updateMany: { where: { title: "Client confirms they want to proceed", clientAction: true }, data: { completedAt: decidedAt } } }, timeline: { create: { title: "Client chose to proceed", details: "The professional can now request the required documents." } } } }),
   ]);
   revalidatePath(`/cases/${caseId}`);
   revalidatePath(`/professional/cases/${caseId}`);
@@ -136,18 +136,22 @@ export async function requestRemainingPayment(formData: FormData) {
   const { user, record } = await ownedCase(caseId);
   if (user.role !== "PROFESSIONAL" && user.role !== "ADMIN") throw new Error("Professional access required.");
   const assessment = record.payments.find((item) => item.stage === "ASSESSMENT");
-  if (assessment?.status !== "PAID") throw new Error("The assessment must be paid first.");
-  if (record.status !== "AWAITING_DOCUMENTS_AND_PAYMENT" || record.assessment?.clientDecision !== "PROCEED") throw new Error("The client must choose to proceed before a remaining payment can be requested.");
+  const requestedDocumentsConfirmed = record.checklist.some((item) => item.title === requestedDocumentsReceivedTitle && item.completedAt);
+  if (!canRequestRemainingPayment({ assessmentPaid: assessment?.status === "PAID", status: record.status, clientDecision: record.assessment?.clientDecision ?? null, requestedDocumentsConfirmed: Boolean(requestedDocumentsConfirmed) })) {
+    throw new Error("The client must proceed and the professional must confirm receipt of the requested documents before requesting the remaining payment.");
+  }
   const isOther = record.service.code === "OTHER";
   const entered = Number(formData.get("amount"));
   const amount = isOther ? entered : Number(record.service.totalPrice) - Number(record.service.assessmentFee);
   if (!Number.isFinite(amount) || amount < 0) throw new Error("Enter a valid remaining amount.");
-  await prisma.paymentRequest.upsert({
-    where: { caseId_stage: { caseId, stage: "REMAINING_BALANCE" } },
-    update: { amount, status: "PENDING", requestedAt: new Date(), paidAt: null, providerReference: null },
-    create: { caseId, stage: "REMAINING_BALANCE", amount },
-  });
-  await prisma.caseTimelineEvent.create({ data: { caseId, title: "Remaining payment requested", details: `€${amount.toFixed(2)} is due.` } });
+  try {
+    await prisma.$transaction([
+      prisma.paymentRequest.create({ data: { caseId, stage: "REMAINING_BALANCE", amount } }),
+      prisma.caseTimelineEvent.create({ data: { caseId, title: "Remaining payment requested", details: `€${amount.toFixed(2)} is due.` } }),
+    ]);
+  } catch (error) {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
+  }
   revalidatePath(`/professional/cases/${caseId}`);
 }
 
@@ -164,11 +168,15 @@ export async function addChecklistItem(formData: FormData) {
 export async function toggleChecklistItem(formData: FormData) {
   const caseId = String(formData.get("caseId") ?? "");
   const itemId = String(formData.get("itemId") ?? "");
-  const { user } = await ownedCase(caseId);
+  const { user, record } = await ownedCase(caseId);
   if (user.role === "CLIENT") throw new Error("Professional access required.");
   const item = await prisma.caseChecklistItem.findFirst({ where: { id: itemId, caseId } });
   if (!item) throw new Error("Checklist item not found.");
-  if (item.clientAction) throw new Error("Client action items can only be completed by the related client action.");
+  const isRequestedDocumentsConfirmation = item.title === requestedDocumentsReceivedTitle;
+  if (item.clientAction && !isRequestedDocumentsConfirmation) throw new Error("Client action items can only be completed by the related client action.");
+  if (!item.completedAt && isRequestedDocumentsConfirmation && !canConfirmRequestedDocuments({ title: item.title, clientDocumentCount: record.documents.filter((document) => document.folder === "CLIENT").length, status: record.status, clientDecision: record.assessment?.clientDecision ?? null })) {
+    throw new Error("The client must upload the requested documents before they can be confirmed as received.");
+  }
   await prisma.caseChecklistItem.update({ where: { id: item.id }, data: { completedAt: item.completedAt ? null : new Date() } });
   revalidatePath(`/professional/cases/${caseId}`);
   revalidatePath(`/cases/${caseId}`);

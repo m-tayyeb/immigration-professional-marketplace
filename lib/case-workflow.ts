@@ -1,6 +1,7 @@
 import type { CaseStatus, MatterType } from "@prisma/client";
 
 export const assessmentFeeCents = 10_000;
+export const requestedDocumentsReceivedTitle = "Requested client documents received";
 
 export const countries = ["Finland", "Sweden", "Germany", "United Kingdom", "Canada", "Australia"] as const;
 
@@ -37,6 +38,38 @@ export function canManuallyTransitionCaseStatus(
   assessmentPaid: boolean,
 ) {
   return manualStatusTransitions(currentStatus, assessmentPaid).includes(nextStatus);
+}
+
+export function canConfirmRequestedDocuments(input: {
+  title: string;
+  clientDocumentCount: number;
+  status: CaseStatus;
+  clientDecision: "PROCEED" | "DO_NOT_PROCEED" | null;
+}) {
+  return input.title === requestedDocumentsReceivedTitle
+    && input.clientDocumentCount > 0
+    && input.status === "AWAITING_DOCUMENTS_AND_PAYMENT"
+    && input.clientDecision === "PROCEED";
+}
+
+export function canRequestRemainingPayment(input: {
+  assessmentPaid: boolean;
+  status: CaseStatus;
+  clientDecision: "PROCEED" | "DO_NOT_PROCEED" | null;
+  requestedDocumentsConfirmed: boolean;
+}) {
+  return input.assessmentPaid
+    && input.status === "AWAITING_DOCUMENTS_AND_PAYMENT"
+    && input.clientDecision === "PROCEED"
+    && input.requestedDocumentsConfirmed;
+}
+
+export function statusAfterPayment(stage: "ASSESSMENT" | "REMAINING_BALANCE"): CaseStatus {
+  return stage === "ASSESSMENT" ? "ASSESSMENT_PAID" : "DOCUMENT_REVIEW";
+}
+
+export function completedChecklistTitleAfterPayment(stage: "ASSESSMENT" | "REMAINING_BALANCE") {
+  return stage === "REMAINING_BALANCE" ? "Remaining balance paid" : null;
 }
 
 export function progressFromChecklist(items: { completedAt: Date | null }[]) {
