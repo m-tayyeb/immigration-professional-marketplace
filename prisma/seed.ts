@@ -1,6 +1,7 @@
 import { PrismaClient, ProfessionalType, UserRole, VerificationStatus } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { hashPassword } from "../lib/password";
+import { acceptsNewFinlandMvpCases, isFinlandMvpAssignableServiceCode } from "../lib/professional-assignment";
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -69,7 +70,7 @@ async function main() {
     ["Student Visa", "Support for study-based immigration applications."], ["Work Visa", "Guidance for employment-based immigration routes."], ["Family Reunification", "Support for family residence applications."], ["Residence Permit", "Advice for temporary and long-term residence permits."], ["Permanent Residence", "Planning and support for permanent residence routes."], ["Citizenship", "Naturalisation and citizenship application guidance."], ["Business Immigration", "Immigration support for founders and entrepreneurs."],
   ].map(([name, description]) => prisma.immigrationService.upsert({ where: { name }, update: { description }, create: { name, description } })));
 
-  await Promise.all([
+  const finlandMvpServices = await Promise.all([
     { code: "FIRST_RESIDENCE_PERMIT", name: "First Residence Permit", description: "Assessment and end-to-end support for a first Finnish residence permit.", totalPrice: 500 },
     { code: "RESIDENCE_PERMIT_RENEWAL", name: "Residence Permit Renewal", description: "Assessment and end-to-end support for renewing a Finnish residence permit.", totalPrice: 500 },
     { code: "OTHER", name: "Other", description: "Assessment for immigration, integration, licensing, or social-benefit guidance.", totalPrice: null },
@@ -84,6 +85,7 @@ async function main() {
 
   for (const seedProfessional of professionals) {
     const passwordHash = await hashPassword("Professional123!");
+    const acceptingNewCases = acceptsNewFinlandMvpCases(seedProfessional.email);
     const user = await prisma.user.upsert({
       where: { email: seedProfessional.email },
       update: { name: seedProfessional.name, role: UserRole.PROFESSIONAL },
@@ -98,6 +100,7 @@ async function main() {
         location: seedProfessional.location,
         yearsOfExperience: seedProfessional.yearsOfExperience,
         verificationStatus: VerificationStatus.VERIFIED,
+        acceptingNewCases,
         rating: seedProfessional.rating,
         reviewCount: seedProfessional.reviewCount,
         completedCases: seedProfessional.completedCases,
@@ -109,6 +112,7 @@ async function main() {
         location: seedProfessional.location,
         yearsOfExperience: seedProfessional.yearsOfExperience,
         verificationStatus: VerificationStatus.VERIFIED,
+        acceptingNewCases,
         rating: seedProfessional.rating,
         reviewCount: seedProfessional.reviewCount,
         completedCases: seedProfessional.completedCases,
@@ -131,6 +135,22 @@ async function main() {
         update: { price: seedService.price, durationMinutes: seedService.durationMinutes, description: seedService.description },
         create: { professionalId: profile.id, serviceId: service.id, price: seedService.price, durationMinutes: seedService.durationMinutes, description: seedService.description },
       });
+    }
+
+    if (acceptingNewCases) {
+      for (const service of finlandMvpServices.filter((item) => isFinlandMvpAssignableServiceCode(item.code))) {
+        await prisma.professionalService.upsert({
+          where: { professionalId_serviceId: { professionalId: profile.id, serviceId: service.id } },
+          update: {},
+          create: {
+            professionalId: profile.id,
+            serviceId: service.id,
+            price: service.totalPrice ?? service.assessmentFee,
+            durationMinutes: 45,
+            description: `Finland MVP support for ${service.name.toLowerCase()}.`,
+          },
+        });
+      }
     }
   }
 

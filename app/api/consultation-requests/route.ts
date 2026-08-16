@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ConsultationStatus, UserRole } from "@prisma/client";
 import { prisma } from "../../../lib/prisma";
+import { professionalEligibilityWhere } from "../../../lib/professional-assignment";
 
 type RequestBody = {
   clientName?: string;
@@ -75,8 +76,7 @@ export async function POST(request: Request) {
     const professional = await prisma.professionalProfile.findFirst({
       where: {
         ...(professionalId ? { id: professionalId } : { user: { name: professionalName } }),
-        countries: { some: { countryId: country.id } },
-        services: { some: { serviceId: service.id } },
+        ...professionalEligibilityWhere(country.id, service.id),
       },
       select: { id: true },
     });

@@ -10,6 +10,7 @@ import { auth } from "../auth";
 import { paymentGateway } from "./payments";
 import { prisma } from "./prisma";
 import { canConfirmRequestedDocuments, canManuallyTransitionCaseStatus, canRequestRemainingPayment, completedChecklistTitleAfterPayment, requestedDocumentsReceivedTitle, statusAfterPayment } from "./case-workflow";
+import { caseAccessWhere, professionalEligibilityWhere, selectProfessionalForAssignment } from "./professional-assignment";
 
 async function sessionUser() {
   const session = await auth();
@@ -20,7 +21,7 @@ async function sessionUser() {
 async function ownedCase(caseId: string) {
   const user = await sessionUser();
   const record = await prisma.case.findFirst({
-    where: user.role === "CLIENT" ? { id: caseId, clientId: user.id } : user.role === "PROFESSIONAL" ? { id: caseId, professional: { userId: user.id } } : { id: caseId },
+    where: caseAccessWhere(caseId, user),
     include: { service: true, payments: true, assessment: true, checklist: true, documents: true },
   });
   if (!record) throw new Error("Case not found or access denied.");
@@ -35,10 +36,15 @@ export async function createCase(formData: FormData) {
   const matterType = String(formData.get("matterType") ?? "IMMIGRATION") as MatterType;
   const matterDescription = String(formData.get("matterDescription") ?? "").trim();
   if (!serviceId || !countryId || (matterType === "OTHER" && !matterDescription)) throw new Error("Complete the service intake.");
-  const [service, professional] = await Promise.all([
+  const [service, assignableProfessionals] = await Promise.all([
     prisma.immigrationService.findFirst({ where: { id: serviceId, active: true } }),
-    prisma.professionalProfile.findFirst({ where: { verificationStatus: "VERIFIED", countries: { some: { countryId } } }, orderBy: { createdAt: "asc" } }),
+    prisma.professionalProfile.findMany({
+      where: professionalEligibilityWhere(countryId, serviceId),
+      select: { id: true, createdAt: true, verificationStatus: true, acceptingNewCases: true, countries: { select: { countryId: true } }, services: { select: { serviceId: true } } },
+      orderBy: { createdAt: "asc" },
+    }),
   ]);
+  const professional = selectProfessionalForAssignment(assignableProfessionals, countryId, serviceId);
   if (!service || !professional) throw new Error("No verified professional is currently available for this selection.");
   const created = await prisma.case.create({
     data: {
