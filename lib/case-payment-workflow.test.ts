@@ -21,7 +21,7 @@ test("remaining payment can be requested after document confirmation", () => {
   assert.equal(canRequestRemainingPayment({ ...readyForDocuments, requestedDocumentsConfirmed: true }), true);
 });
 
-test("paying the remaining balance moves the case to document review and completes its checklist item", () => {
-  assert.equal(statusAfterPayment("REMAINING_BALANCE"), "DOCUMENT_REVIEW");
+test("paying the remaining balance moves the case to file preparation and completes its checklist item", () => {
+  assert.equal(statusAfterPayment("REMAINING_BALANCE"), "FILE_PREPARATION");
   assert.equal(completedChecklistTitleAfterPayment("REMAINING_BALANCE"), "Remaining balance paid");
 });

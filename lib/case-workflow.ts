@@ -26,6 +26,8 @@ export const statusLabels: Record<CaseStatus, string> = {
   DOCUMENT_REVIEW: "Document review",
   MAIN_WORK_IN_PROGRESS: "Main work in progress",
   PREPARING_DOCUMENTS: "Preparing documents",
+  FILE_PREPARATION: "File preparation",
+  FILE_READY_FOR_REVIEW: "File ready for final review",
   COMPLETED: "Completed",
   CANCELLED: "Cancelled",
 };
@@ -80,7 +82,7 @@ export function canRequestRemainingPayment(input: {
 }
 
 export function statusAfterPayment(stage: "ASSESSMENT" | "REMAINING_BALANCE"): CaseStatus {
-  return stage === "ASSESSMENT" ? "ASSESSMENT_PAID" : "DOCUMENT_REVIEW";
+  return stage === "ASSESSMENT" ? "ASSESSMENT_PAID" : "FILE_PREPARATION";
 }
 
 export function completedChecklistTitleAfterPayment(stage: "ASSESSMENT" | "REMAINING_BALANCE") {
@@ -111,6 +113,8 @@ export function nextAction(status: CaseStatus, role: "CLIENT" | "PROFESSIONAL" |
   if (status === "AWAITING_DOCUMENTS_AND_PAYMENT") return "Review incoming documents and payment";
   if (status === "DOCUMENT_REVIEW") return "Review the client documents";
   if (status === "MAIN_WORK_IN_PROGRESS") return "Update checklist and prepare documents";
+  if (status === "FILE_PREPARATION") return "Prepare the application file";
+  if (status === "FILE_READY_FOR_REVIEW") return "Arrange the final file review appointment";
   return "Update the case when work advances";
 }
 

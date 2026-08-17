@@ -8,6 +8,7 @@ import { appointmentFields, localAppointmentToUtc, parseConsultationMethod, vali
 import { activeAppointmentForPurpose, appointmentConfirmationEffect, canClientManageAppointment, canOfficiallyManageAppointment, canWithdrawAssessment, parseAppointmentPurpose, parseConfirmationSource } from "./appointment-workflow";
 import { caseAccessWhere } from "./professional-assignment";
 import { prisma } from "./prisma";
+import { canStartFinalReviewAppointment } from "./document-workflow";
 
 async function appointmentCase(caseId: string) {
   const session = await auth();
@@ -23,6 +24,11 @@ async function appointmentCase(caseId: string) {
   });
   if (!record) throw new Error("Case not found or access denied.");
   return { user: session.user, record };
+}
+
+function assertPurposeGate(record: { status: string; fileReadyAt: Date | null; payments: { stage: string; status: string }[] }, purpose: string) {
+  if (purpose === "ASSESSMENT_CONSULTATION" && !["AWAITING_ASSESSMENT_REVIEW", "AWAITING_ASSESSMENT_PAYMENT"].includes(record.status)) throw new Error("This assessment consultation cannot be managed now.");
+  if (purpose === "FINAL_FILE_REVIEW" && !canStartFinalReviewAppointment(record.payments.some((payment) => payment.stage === "REMAINING_BALANCE" && payment.status === "PAID"), Boolean(record.fileReadyAt))) throw new Error("The file must be ready and the remaining payment paid before final review can be booked.");
 }
 
 function proposalFromForm(formData: FormData) {
@@ -97,7 +103,7 @@ export async function bookConfirmedAppointment(formData: FormData) {
   const confirmationNote = String(formData.get("confirmationNote") ?? "").trim();
   const { user, record } = await appointmentCase(caseId);
   if (!canOfficiallyManageAppointment(user, record.professional.userId)) throw new Error("Assigned professional access required.");
-  if (purpose === "ASSESSMENT_CONSULTATION" && !["AWAITING_ASSESSMENT_REVIEW", "AWAITING_ASSESSMENT_PAYMENT"].includes(record.status)) throw new Error("This assessment consultation cannot be booked now.");
+  assertPurposeGate(record, purpose);
   await prisma.$transaction(async (tx) => {
     const now = new Date();
     const activeAppointment = await activeAppointmentInTransaction(tx, caseId, purpose);
@@ -122,7 +128,7 @@ export async function proposeAppointment(formData: FormData) {
   const details = proposalFromForm(formData);
   const { user, record } = await appointmentCase(caseId);
   if (!canOfficiallyManageAppointment(user, record.professional.userId)) throw new Error("Assigned professional access required.");
-  if (purpose === "ASSESSMENT_CONSULTATION" && !["AWAITING_ASSESSMENT_REVIEW", "AWAITING_ASSESSMENT_PAYMENT"].includes(record.status)) throw new Error("This assessment consultation cannot be proposed now.");
+  assertPurposeGate(record, purpose);
   const currentActiveAppointment = activeAppointmentForPurpose(record.appointments, purpose);
   const revising = Boolean(currentActiveAppointment);
   await prisma.$transaction(async (tx) => {
