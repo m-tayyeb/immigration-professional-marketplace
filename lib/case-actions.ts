@@ -13,6 +13,7 @@ import { assessmentRequestFields, canDecideAssessmentRequest, caseContactSnapsho
 import { assessmentPaymentAllowed } from "./appointment-workflow";
 import { assessmentRequestDecisionStatus, canConfirmRequestedDocuments, canManuallyTransitionCaseStatus, canPayAssessmentFee, canRequestRemainingPayment, completedChecklistTitleAfterPayment, requestedDocumentsReceivedTitle, statusAfterPayment } from "./case-workflow";
 import { caseAccessWhere, professionalEligibilityWhere, selectProfessionalForAssignment } from "./professional-assignment";
+import { buildDoNotProceedDecisionEvidence, buildProceedDecisionEvidence, canRecordClientDecision, deriveServiceAgreementAmounts, hasFinancialAcknowledgement } from "./service-agreement";
 
 async function sessionUser() {
   const session = await auth();
@@ -24,7 +25,7 @@ async function ownedCase(caseId: string) {
   const user = await sessionUser();
   const record = await prisma.case.findFirst({
     where: caseAccessWhere(caseId, user),
-    include: { service: true, payments: true, assessment: true, checklist: true, documents: true, professional: { include: { user: true } }, appointments: { where: { purpose: "ASSESSMENT_CONSULTATION" }, select: { id: true, status: true } } },
+    include: { service: true, payments: true, assessment: true, serviceDecision: true, checklist: true, documents: true, professional: { include: { user: true } }, appointments: { where: { purpose: "ASSESSMENT_CONSULTATION" }, select: { id: true, status: true } } },
   });
   if (!record) throw new Error("Case not found or access denied.");
   return { user, record };
@@ -124,12 +125,22 @@ export async function declineAssessmentRequest(formData: FormData) {
 export async function agreeToProceed(formData: FormData) {
   const caseId = String(formData.get("caseId") ?? "");
   const { user, record } = await ownedCase(caseId);
-  if (user.role !== "CLIENT" || record.status !== "AWAITING_CLIENT_DECISION" || !record.assessment?.releasedAt || record.assessment.clientDecision) throw new Error("This decision is not available.");
+  if (!canRecordClientDecision({ userId: user.id, userRole: user.role, caseClientId: record.clientId, status: record.status, assessmentReleased: Boolean(record.assessment?.releasedAt), existingDecision: record.assessment?.clientDecision ?? null, agreementExists: Boolean(record.serviceDecision) })) throw new Error("This decision is not available.");
+  if (!hasFinancialAcknowledgement(formData.get("financialAcknowledgement"))) throw new Error("Confirm the remaining financial obligation before proceeding.");
+  const assessmentPayment = record.payments.find((payment) => payment.stage === "ASSESSMENT" && payment.status === "PAID");
+  if (!assessmentPayment) throw new Error("A paid assessment is required before proceeding.");
+  const amounts = deriveServiceAgreementAmounts(record.service.totalPrice ? Number(record.service.totalPrice) : null, Number(assessmentPayment.amount));
+  if (!amounts) throw new Error("The service price must be configured before the client can proceed.");
   const decidedAt = new Date();
-  await prisma.$transaction([
-    prisma.caseAssessment.update({ where: { caseId }, data: { clientDecision: "PROCEED", decidedAt } }),
-    prisma.case.update({ where: { id: caseId }, data: { clientAgreedAt: decidedAt, status: "AWAITING_DOCUMENTS_AND_PAYMENT", checklist: { updateMany: { where: { title: "Client confirms they want to proceed", clientAction: true }, data: { completedAt: decidedAt } } }, timeline: { create: { title: "Client chose to proceed", details: "The professional can now request the required documents." } } } }),
-  ]);
+  await prisma.$transaction(async (tx) => {
+    const decision = await tx.caseAssessment.updateMany({ where: { caseId, clientDecision: null }, data: { clientDecision: "PROCEED", decidedAt } });
+    if (decision.count !== 1) throw new Error("A client decision has already been recorded.");
+    await tx.caseServiceDecision.create({ data: { caseId, clientId: user.id, ...buildProceedDecisionEvidence(amounts, decidedAt) } });
+    const updated = await tx.case.updateMany({ where: { id: caseId, status: "AWAITING_CLIENT_DECISION" }, data: { clientAgreedAt: decidedAt, status: "AWAITING_DOCUMENTS_AND_PAYMENT" } });
+    if (updated.count !== 1) throw new Error("This case no longer permits a client decision.");
+    await tx.caseChecklistItem.updateMany({ where: { caseId, title: "Client confirms they want to proceed", clientAction: true }, data: { completedAt: decidedAt } });
+    await tx.caseTimelineEvent.create({ data: { caseId, title: "Client chose to proceed", details: `The client formally authorized the service and acknowledged a remaining obligation of €${amounts.remainingAmountAcknowledged.toFixed(2)}.` } });
+  });
   revalidatePath(`/cases/${caseId}`);
   revalidatePath(`/professional/cases/${caseId}`);
 }
@@ -137,13 +148,17 @@ export async function agreeToProceed(formData: FormData) {
 export async function doNotProceed(formData: FormData) {
   const caseId = String(formData.get("caseId") ?? "");
   const { user, record } = await ownedCase(caseId);
-  if (user.role !== "CLIENT" || record.status !== "AWAITING_CLIENT_DECISION" || !record.assessment?.releasedAt || record.assessment.clientDecision) throw new Error("This decision is not available.");
+  if (!canRecordClientDecision({ userId: user.id, userRole: user.role, caseClientId: record.clientId, status: record.status, assessmentReleased: Boolean(record.assessment?.releasedAt), existingDecision: record.assessment?.clientDecision ?? null, agreementExists: Boolean(record.serviceDecision) })) throw new Error("This decision is not available.");
   const decidedAt = new Date();
-  await prisma.$transaction([
-    prisma.caseAssessment.update({ where: { caseId }, data: { clientDecision: "DO_NOT_PROCEED", decidedAt } }),
-    prisma.paymentRequest.updateMany({ where: { caseId, stage: "REMAINING_BALANCE", status: "PENDING" }, data: { status: "CANCELLED" } }),
-    prisma.case.update({ where: { id: caseId }, data: { status: "CANCELLED", completedAt: decidedAt, timeline: { create: { title: "Client chose not to proceed", details: "The case was stopped after the assessment. No remaining payment was requested." } } } }),
-  ]);
+  await prisma.$transaction(async (tx) => {
+    const decision = await tx.caseAssessment.updateMany({ where: { caseId, clientDecision: null }, data: { clientDecision: "DO_NOT_PROCEED", decidedAt } });
+    if (decision.count !== 1) throw new Error("A client decision has already been recorded.");
+    await tx.caseServiceDecision.create({ data: { caseId, clientId: user.id, ...buildDoNotProceedDecisionEvidence(decidedAt) } });
+    await tx.paymentRequest.updateMany({ where: { caseId, stage: "REMAINING_BALANCE", status: "PENDING" }, data: { status: "CANCELLED" } });
+    const updated = await tx.case.updateMany({ where: { id: caseId, status: "AWAITING_CLIENT_DECISION" }, data: { status: "CANCELLED", completedAt: decidedAt } });
+    if (updated.count !== 1) throw new Error("This case no longer permits a client decision.");
+    await tx.caseTimelineEvent.create({ data: { caseId, title: "Client chose not to proceed", details: "The case was stopped after the assessment. No remaining payment was requested or acknowledged." } });
+  });
   revalidatePath(`/cases/${caseId}`);
   revalidatePath(`/professional/cases/${caseId}`);
   revalidatePath("/dashboard");

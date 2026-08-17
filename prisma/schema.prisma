@@ -151,6 +151,7 @@ model User {
   acceptedAppointmentRevisions CaseAppointmentRevision[] @relation("AppointmentRevisionAcceptor")
   bookedAppointments           CaseAppointment[]         @relation("AppointmentBooker")
   appointmentMessages          CaseAppointmentMessage[]
+  serviceDecisions             CaseServiceDecision[]
 }
 
 model ClientProfile {
@@ -387,9 +388,28 @@ model Case {
   contactSnapshot   CaseContactSnapshot?
   appointments      CaseAppointment[]
   notifications     Notification[]
+  serviceDecision   CaseServiceDecision?
 
   @@index([clientId, status])
   @@index([professionalId, status])
+}
+
+model CaseServiceDecision {
+  id                              String         @id @default(cuid())
+  caseId                          String         @unique
+  clientId                        String
+  decision                        ClientDecision
+  decidedAt                       DateTime       @default(now())
+  assessmentPaidAmount            Decimal?       @db.Decimal(10, 2)
+  totalServiceAmount              Decimal?       @db.Decimal(10, 2)
+  remainingAmountAcknowledged     Decimal?       @db.Decimal(10, 2)
+  financialObligationConfirmed    Boolean        @default(false)
+  agreementVersion                String?
+  agreementText                   String?        @db.Text
+  case                            Case           @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  client                          User           @relation(fields: [clientId], references: [id], onDelete: Restrict)
+
+  @@index([clientId, decidedAt])
 }
 
 model CaseAppointment {
