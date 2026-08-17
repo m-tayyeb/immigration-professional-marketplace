@@ -96,6 +96,12 @@ enum ClientDecision {
   DO_NOT_PROCEED
 }
 
+enum ConsultationMethod {
+  ONLINE
+  TELEPHONE
+  FACE_TO_FACE
+}
+
 model User {
   id                   String                @id @default(cuid())
   email                String                @unique
@@ -111,6 +117,34 @@ model User {
   clientCases          Case[]                @relation("ClientCases")
   authoredMessages     CaseMessage[]
   uploadedDocuments    CaseDocument[]
+  clientProfile        ClientProfile?
+}
+
+model ClientProfile {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  telephone   String
+  addressLine String
+  city        String
+  postalCode  String
+  country     String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model CaseContactSnapshot {
+  id          String   @id @default(cuid())
+  caseId      String   @unique
+  fullName    String
+  email       String
+  telephone   String
+  addressLine String
+  city        String
+  postalCode  String
+  country     String
+  createdAt   DateTime @default(now())
+  case        Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
 }
 
 model ProfessionalProfile {
@@ -285,6 +319,17 @@ model Case {
   serviceId         String
   matterType        MatterType          @default(IMMIGRATION)
   matterDescription String?             @db.Text
+  situationDescription       String?             @db.Text
+  preferredConsultationMethod ConsultationMethod?
+  preferredAvailability      String?             @db.Text
+  relevantDeadline           DateTime?
+  additionalMessage          String?             @db.Text
+  confirmedConsultationMethod ConsultationMethod?
+  appointmentAtUtc           DateTime?            @db.Timestamptz(3)
+  appointmentTimeZone        String?
+  professionalMessage        String?             @db.Text
+  appointmentInstructions    String?             @db.Text
+  declineReason              String?             @db.Text
   status            CaseStatus          @default(AWAITING_ASSESSMENT_REVIEW)
   clientAgreedAt    DateTime?
   createdAt         DateTime            @default(now())
@@ -300,6 +345,7 @@ model Case {
   timeline          CaseTimelineEvent[]
   messages          CaseMessage[]
   assessment        CaseAssessment?
+  contactSnapshot   CaseContactSnapshot?
 
   @@index([clientId, status])
   @@index([professionalId, status])

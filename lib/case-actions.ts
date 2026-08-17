@@ -9,6 +9,7 @@ import { redirect } from "next/navigation";
 import { auth } from "../auth";
 import { paymentGateway } from "./payments";
 import { prisma } from "./prisma";
+import { appointmentFields, assessmentPaymentFields, assessmentRequestFields, canDecideAssessmentRequest, caseContactSnapshot, isCompleteClientContact, localAppointmentToUtc, parseConsultationMethod, parseOptionalDate, validateAppointmentInput } from "./assessment-intake";
 import { assessmentRequestDecisionStatus, canConfirmRequestedDocuments, canManuallyTransitionCaseStatus, canPayAssessmentFee, canRequestRemainingPayment, completedChecklistTitleAfterPayment, requestedDocumentsReceivedTitle, statusAfterPayment } from "./case-workflow";
 import { caseAccessWhere, professionalEligibilityWhere, selectProfessionalForAssignment } from "./professional-assignment";
 
@@ -22,7 +23,7 @@ async function ownedCase(caseId: string) {
   const user = await sessionUser();
   const record = await prisma.case.findFirst({
     where: caseAccessWhere(caseId, user),
-    include: { service: true, payments: true, assessment: true, checklist: true, documents: true },
+    include: { service: true, payments: true, assessment: true, checklist: true, documents: true, professional: { include: { user: true } } },
   });
   if (!record) throw new Error("Case not found or access denied.");
   return { user, record };
@@ -35,8 +36,14 @@ export async function createCase(formData: FormData) {
   const countryId = String(formData.get("countryId") ?? "");
   const matterType = String(formData.get("matterType") ?? "IMMIGRATION") as MatterType;
   const matterDescription = String(formData.get("matterDescription") ?? "").trim();
-  if (!serviceId || !countryId || (matterType === "OTHER" && !matterDescription)) throw new Error("Complete the service intake.");
-  const [service, assignableProfessionals] = await Promise.all([
+  const situationDescription = String(formData.get("situationDescription") ?? "").trim();
+  const preferredConsultationMethod = parseConsultationMethod(formData.get("preferredConsultationMethod"));
+  const preferredAvailability = String(formData.get("preferredAvailability") ?? "").trim();
+  const relevantDeadline = parseOptionalDate(formData.get("relevantDeadline"));
+  const additionalMessage = String(formData.get("additionalMessage") ?? "").trim();
+  if (!serviceId || !countryId || !situationDescription || !preferredConsultationMethod || relevantDeadline === undefined || (matterType === "OTHER" && !matterDescription)) throw new Error("Complete the assessment request intake.");
+  const [client, service, assignableProfessionals] = await Promise.all([
+    prisma.user.findUnique({ where: { id: user.id }, include: { clientProfile: true } }),
     prisma.immigrationService.findFirst({ where: { id: serviceId, active: true } }),
     prisma.professionalProfile.findMany({
       where: professionalEligibilityWhere(countryId, serviceId),
@@ -44,12 +51,16 @@ export async function createCase(formData: FormData) {
       orderBy: { createdAt: "asc" },
     }),
   ]);
+  if (!client || !isCompleteClientContact({ name: client.name, email: client.email, profile: client.clientProfile })) throw new Error("Complete your client contact profile before requesting an assessment.");
+  const contactSnapshot = caseContactSnapshot({ name: client.name, email: client.email, profile: client.clientProfile });
   const professional = selectProfessionalForAssignment(assignableProfessionals, countryId, serviceId);
   if (!service || !professional) throw new Error("No verified professional is currently available for this selection.");
   const created = await prisma.case.create({
     data: {
       clientId: user.id, professionalId: professional.id, countryId, serviceId,
-      matterType, matterDescription: matterDescription || null, status: "AWAITING_ASSESSMENT_REVIEW",
+      matterType, matterDescription: matterDescription || null,
+      ...assessmentRequestFields({ situationDescription, preferredConsultationMethod, preferredAvailability, relevantDeadline, additionalMessage }),
+      contactSnapshot: { create: contactSnapshot },
       checklist: { create: [
         { title: "Assessment completed", position: 1 },
         { title: "Client confirms they want to proceed", clientAction: true, position: 2 },
@@ -86,13 +97,26 @@ export async function payRequest(formData: FormData) {
 export async function approveAssessmentRequest(formData: FormData) {
   const caseId = String(formData.get("caseId") ?? "");
   const { user, record } = await ownedCase(caseId);
-  if (user.role === "CLIENT") throw new Error("Professional access required.");
+  if (!canDecideAssessmentRequest(user, record.professional.userId, record.status)) throw new Error("Professional access required.");
   const nextStatus = assessmentRequestDecisionStatus(record.status, "APPROVE");
   if (!nextStatus) throw new Error("This assessment request cannot be approved.");
+  const appointmentTimeZone = String(formData.get("appointmentTimeZone") ?? "").trim();
+  const appointment = {
+    method: parseConsultationMethod(formData.get("confirmedConsultationMethod")),
+    appointmentAtUtc: localAppointmentToUtc(String(formData.get("appointmentAt") ?? ""), appointmentTimeZone),
+    timeZone: appointmentTimeZone,
+    instructions: String(formData.get("appointmentInstructions") ?? "").trim(),
+    professionalMessage: String(formData.get("professionalMessage") ?? "").trim(),
+  };
+  if (!validateAppointmentInput(appointment)) throw new Error("Complete the appointment date, time zone, method, and method-specific instructions.");
+  const savedAppointment = appointmentFields(appointment);
   await prisma.$transaction(async (tx) => {
-    const updated = await tx.case.updateMany({ where: { id: caseId, status: "AWAITING_ASSESSMENT_REVIEW" }, data: { status: nextStatus } });
+    const updated = await tx.case.updateMany({ where: { id: caseId, status: "AWAITING_ASSESSMENT_REVIEW" }, data: {
+      status: nextStatus,
+      ...savedAppointment,
+    } });
     if (updated.count !== 1) throw new Error("This assessment request has already been decided.");
-    await tx.paymentRequest.create({ data: { caseId, stage: "ASSESSMENT", amount: record.service.assessmentFee } });
+    await tx.paymentRequest.create({ data: { caseId, ...assessmentPaymentFields(record.service.assessmentFee) } });
     await tx.caseTimelineEvent.create({ data: { caseId, title: "Assessment request approved", details: "The €100 assessment payment is now due." } });
   });
   revalidatePath(`/professional/cases/${caseId}`);
@@ -103,15 +127,16 @@ export async function approveAssessmentRequest(formData: FormData) {
 export async function declineAssessmentRequest(formData: FormData) {
   const caseId = String(formData.get("caseId") ?? "");
   const { user, record } = await ownedCase(caseId);
-  if (user.role === "CLIENT") throw new Error("Professional access required.");
+  if (!canDecideAssessmentRequest(user, record.professional.userId, record.status)) throw new Error("Professional access required.");
   const nextStatus = assessmentRequestDecisionStatus(record.status, "DECLINE");
   if (!nextStatus) throw new Error("This assessment request cannot be declined.");
   const declinedAt = new Date();
+  const declineReason = String(formData.get("declineReason") ?? "").trim();
   await prisma.$transaction(async (tx) => {
-    const updated = await tx.case.updateMany({ where: { id: caseId, status: "AWAITING_ASSESSMENT_REVIEW" }, data: { status: nextStatus, completedAt: declinedAt } });
+    const updated = await tx.case.updateMany({ where: { id: caseId, status: "AWAITING_ASSESSMENT_REVIEW" }, data: { status: nextStatus, completedAt: declinedAt, declineReason: declineReason || null } });
     if (updated.count !== 1) throw new Error("This assessment request has already been decided.");
     await tx.paymentRequest.updateMany({ where: { caseId, stage: "ASSESSMENT", status: "PENDING" }, data: { status: "CANCELLED" } });
-    await tx.caseTimelineEvent.create({ data: { caseId, title: "Assessment request declined", details: "No assessment payment is due and assessment work will not begin." } });
+    await tx.caseTimelineEvent.create({ data: { caseId, title: "Assessment request declined", details: declineReason || "No assessment payment is due and assessment work will not begin." } });
   });
   revalidatePath(`/professional/cases/${caseId}`);
   revalidatePath(`/cases/${caseId}`);
