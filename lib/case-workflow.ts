@@ -17,6 +17,7 @@ export const matters: { value: MatterType; label: string }[] = [
 export const statusLabels: Record<CaseStatus, string> = {
   AWAITING_ASSESSMENT_REVIEW: "Awaiting professional review",
   ASSESSMENT_REQUEST_DECLINED: "Assessment request declined",
+  ASSESSMENT_REQUEST_WITHDRAWN: "Assessment request withdrawn",
   AWAITING_ASSESSMENT_PAYMENT: "Awaiting assessment payment",
   ASSESSMENT_PAID: "Assessment queued",
   ASSESSMENT_IN_PROGRESS: "Assessment in progress",
@@ -95,6 +96,7 @@ export function nextAction(status: CaseStatus, role: "CLIENT" | "PROFESSIONAL" |
   if (role === "CLIENT") {
     if (status === "AWAITING_ASSESSMENT_REVIEW") return "Wait for the professional to review your assessment request";
     if (status === "ASSESSMENT_REQUEST_DECLINED") return "This assessment request was declined";
+    if (status === "ASSESSMENT_REQUEST_WITHDRAWN") return "This assessment request was withdrawn";
     if (status === "AWAITING_ASSESSMENT_PAYMENT") return "Pay the €100 assessment fee";
     if (status === "AWAITING_CLIENT_DECISION") return "Confirm whether you want to proceed";
     if (status === "AWAITING_DOCUMENTS_AND_PAYMENT") return "Upload requested documents and pay the balance";
@@ -103,6 +105,7 @@ export function nextAction(status: CaseStatus, role: "CLIENT" | "PROFESSIONAL" |
   }
   if (status === "AWAITING_ASSESSMENT_REVIEW") return "Approve or decline the assessment request";
   if (status === "ASSESSMENT_REQUEST_DECLINED") return "No further assessment action is available";
+  if (status === "ASSESSMENT_REQUEST_WITHDRAWN") return "No further assessment action is available";
   if (status === "ASSESSMENT_PAID") return "Start the assessment";
   if (status === "ASSESSMENT_IN_PROGRESS") return "Complete the assessment";
   if (status === "AWAITING_DOCUMENTS_AND_PAYMENT") return "Review incoming documents and payment";

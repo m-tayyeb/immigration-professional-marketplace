@@ -56,6 +56,7 @@ enum MatterType {
 enum CaseStatus {
   AWAITING_ASSESSMENT_REVIEW
   ASSESSMENT_REQUEST_DECLINED
+  ASSESSMENT_REQUEST_WITHDRAWN
   AWAITING_ASSESSMENT_PAYMENT
   ASSESSMENT_PAID
   ASSESSMENT_IN_PROGRESS
@@ -102,6 +103,34 @@ enum ConsultationMethod {
   FACE_TO_FACE
 }
 
+enum CaseAppointmentPurpose {
+  ASSESSMENT_CONSULTATION
+  FINAL_FILE_REVIEW
+  SUPPLEMENTARY_REQUEST
+}
+
+enum CaseAppointmentStatus {
+  PROPOSED
+  CHANGE_REQUESTED
+  CONFIRMED
+  WITHDRAWN
+  CANCELLED
+  COMPLETED
+}
+
+enum AppointmentConfirmationSource {
+  TELEPHONE
+  EXTERNAL_MESSAGE
+  FACE_TO_FACE
+  OTHER
+}
+
+enum AppointmentMessageKind {
+  MESSAGE
+  CHANGE_REQUEST
+  WITHDRAWAL
+}
+
 model User {
   id                   String                @id @default(cuid())
   email                String                @unique
@@ -118,6 +147,10 @@ model User {
   authoredMessages     CaseMessage[]
   uploadedDocuments    CaseDocument[]
   clientProfile        ClientProfile?
+  proposedAppointmentRevisions CaseAppointmentRevision[] @relation("AppointmentRevisionProposer")
+  acceptedAppointmentRevisions CaseAppointmentRevision[] @relation("AppointmentRevisionAcceptor")
+  bookedAppointments           CaseAppointment[]         @relation("AppointmentBooker")
+  appointmentMessages          CaseAppointmentMessage[]
 }
 
 model ClientProfile {
@@ -306,9 +339,15 @@ model Notification {
   message   String    @db.Text
   readAt    DateTime?
   createdAt DateTime  @default(now())
+  caseId    String?
+  appointmentId String?
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  case      Case?     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  appointment CaseAppointment? @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
 
   @@index([userId, readAt])
+  @@index([caseId])
+  @@index([appointmentId])
 }
 
 model Case {
@@ -346,9 +385,75 @@ model Case {
   messages          CaseMessage[]
   assessment        CaseAssessment?
   contactSnapshot   CaseContactSnapshot?
+  appointments      CaseAppointment[]
+  notifications     Notification[]
 
   @@index([clientId, status])
   @@index([professionalId, status])
+}
+
+model CaseAppointment {
+  id                    String                        @id @default(cuid())
+  caseId                String
+  purpose               CaseAppointmentPurpose
+  status                CaseAppointmentStatus        @default(PROPOSED)
+  method                ConsultationMethod?
+  appointmentAtUtc      DateTime?                     @db.Timestamptz(3)
+  timeZone              String?
+  instructions          String?                       @db.Text
+  professionalMessage   String?                       @db.Text
+  bookedById            String?
+  confirmationSource    AppointmentConfirmationSource?
+  confirmationNote      String?                       @db.Text
+  confirmedAt           DateTime?
+  changeRequestedAt     DateTime?
+  cancelledAt           DateTime?
+  cancellationReason    String?                       @db.Text
+  withdrawnAt           DateTime?
+  withdrawalReason      String?                       @db.Text
+  completedAt           DateTime?
+  createdAt             DateTime                      @default(now())
+  updatedAt             DateTime                      @updatedAt
+  case                  Case                          @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  bookedBy              User?                         @relation("AppointmentBooker", fields: [bookedById], references: [id], onDelete: Restrict)
+  revisions             CaseAppointmentRevision[]
+  messages              CaseAppointmentMessage[]
+  notifications         Notification[]
+
+  @@index([caseId, purpose])
+  @@index([caseId, status])
+}
+
+model CaseAppointmentRevision {
+  id                String                @id @default(cuid())
+  appointmentId     String
+  proposedById      String
+  method            ConsultationMethod
+  appointmentAtUtc  DateTime              @db.Timestamptz(3)
+  timeZone          String
+  instructions      String                @db.Text
+  message           String?               @db.Text
+  createdAt         DateTime              @default(now())
+  acceptedAt        DateTime?
+  acceptedById      String?
+  appointment       CaseAppointment       @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  proposedBy        User                  @relation("AppointmentRevisionProposer", fields: [proposedById], references: [id], onDelete: Restrict)
+  acceptedBy        User?                 @relation("AppointmentRevisionAcceptor", fields: [acceptedById], references: [id], onDelete: Restrict)
+
+  @@index([appointmentId, createdAt])
+}
+
+model CaseAppointmentMessage {
+  id            String                 @id @default(cuid())
+  appointmentId String
+  authorId      String
+  kind          AppointmentMessageKind @default(MESSAGE)
+  body          String                 @db.Text
+  createdAt     DateTime               @default(now())
+  appointment   CaseAppointment        @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  author        User                   @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([appointmentId, createdAt])
 }
 
 model CaseAssessment {
