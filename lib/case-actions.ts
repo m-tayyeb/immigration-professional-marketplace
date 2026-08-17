@@ -1,7 +1,6 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Prisma, type AssessmentOutcome, type CaseStatus, type MatterType } from "@prisma/client";
 import { revalidatePath } from "next/cache";
@@ -15,6 +14,7 @@ import { assessmentRequestDecisionStatus, canManuallyTransitionCaseStatus, canPa
 import { caseAccessWhere, professionalEligibilityWhere, selectProfessionalForAssignment } from "./professional-assignment";
 import { buildDoNotProceedDecisionEvidence, buildProceedDecisionEvidence, canRecordClientDecision, deriveServiceAgreementAmounts, hasFinancialAcknowledgement } from "./service-agreement";
 import { canConfirmDocumentCollection, remainingAmountFromDecision } from "./document-workflow";
+import { documentStorage, storeDocumentWithRollback } from "./document-storage";
 
 async function sessionUser() {
   const session = await auth();
@@ -281,11 +281,8 @@ export async function uploadDocument(formData: FormData) {
   const folder = user.role === "CLIENT" ? "CLIENT" : "PROFESSIONAL";
   const safeName = path.basename(file.name).replace(/[^a-zA-Z0-9._-]/g, "_");
   const storageKey = `${caseId}/${randomUUID()}-${safeName}`;
-  const root = path.join(process.cwd(), ".private-uploads");
-  const fullPath = path.join(root, storageKey);
-  await mkdir(path.dirname(fullPath), { recursive: true });
-  await writeFile(fullPath, Buffer.from(await file.arrayBuffer()));
-  await prisma.caseDocument.create({ data: { caseId, uploadedById: user.id, folder, fileName: safeName, storageKey, mimeType: file.type || "application/octet-stream", size: file.size, releasedToClientAt: folder === "PROFESSIONAL" && formData.get("release") === "on" ? new Date() : null } });
+  const contentType = file.type || "application/octet-stream";
+  await storeDocumentWithRollback({ storage: documentStorage(), key: storageKey, contents: Buffer.from(await file.arrayBuffer()), contentType, commit: (storedKey) => prisma.caseDocument.create({ data: { caseId, uploadedById: user.id, folder, fileName: safeName, storageKey: storedKey, mimeType: contentType, size: file.size, releasedToClientAt: folder === "PROFESSIONAL" && formData.get("release") === "on" ? new Date() : null } }) });
   revalidatePath(`/cases/${caseId}`);
   revalidatePath(`/professional/cases/${caseId}`);
 }

@@ -1,7 +1,6 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
@@ -10,6 +9,7 @@ import { auth } from "../auth";
 import { canConfirmDocumentCollection, canManageCaseDocuments, canMarkFileReady, outstandingDocuments, reminderAllowed, statusAfterRequirementUpload, uploadActorForRole } from "./document-workflow";
 import { caseAccessWhere } from "./professional-assignment";
 import { prisma } from "./prisma";
+import { documentStorage, storeDocumentWithRollback } from "./document-storage";
 
 async function documentCase(caseId: string) {
   const session = await auth();
@@ -53,16 +53,14 @@ export async function uploadRequirementDocument(formData: FormData) {
   if (!(file instanceof File) || !file.size || file.size > 10 * 1024 * 1024) throw new Error("Choose a file up to 10 MB.");
   const safeName = path.basename(file.name).replace(/[^a-zA-Z0-9._-]/g, "_");
   const storageKey = `${caseId}/${randomUUID()}-${safeName}`;
-  const fullPath = path.join(process.cwd(), ".private-uploads", storageKey);
-  await mkdir(path.dirname(fullPath), { recursive: true });
-  await writeFile(fullPath, Buffer.from(await file.arrayBuffer()));
   const actor = uploadActorForRole(user.role);
   const externalSourceNote = actor === "PROFESSIONAL" ? String(formData.get("externalSourceNote") ?? "").trim() : "";
-  await prisma.$transaction([
-    prisma.caseDocument.create({ data: { caseId, requirementId, uploadedById: user.id, uploadActor: actor, externalSourceNote: externalSourceNote || null, folder: "CLIENT", fileName: safeName, storageKey, mimeType: file.type || "application/octet-stream", size: file.size } }),
+  const contentType = file.type || "application/octet-stream";
+  await storeDocumentWithRollback({ storage: documentStorage(), key: storageKey, contents: Buffer.from(await file.arrayBuffer()), contentType, commit: (storedKey) => prisma.$transaction([
+    prisma.caseDocument.create({ data: { caseId, requirementId, uploadedById: user.id, uploadActor: actor, externalSourceNote: externalSourceNote || null, folder: "CLIENT", fileName: safeName, storageKey: storedKey, mimeType: contentType, size: file.size } }),
     prisma.caseDocumentRequirement.update({ where: { id: requirementId }, data: { status: statusAfterRequirementUpload(requirement.status) } }),
     prisma.notification.create({ data: { userId: actor === "CLIENT" ? record.professional.userId : record.clientId, caseId, type: "DOCUMENT_RECEIVED", title: "Document received", message: `${requirement.title} was uploaded by the ${actor.toLowerCase()}.` } }),
-  ]);
+  ]) });
   refresh(caseId);
 }
 
