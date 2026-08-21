@@ -57,7 +57,7 @@ export async function uploadRequirementDocument(formData: FormData) {
   const externalSourceNote = actor === "PROFESSIONAL" ? String(formData.get("externalSourceNote") ?? "").trim() : "";
   const contentType = file.type || "application/octet-stream";
   await storeDocumentWithRollback({ storage: documentStorage(), key: storageKey, contents: Buffer.from(await file.arrayBuffer()), contentType, commit: (storedKey) => prisma.$transaction([
-    prisma.caseDocument.create({ data: { caseId, requirementId, uploadedById: user.id, uploadActor: actor, externalSourceNote: externalSourceNote || null, folder: "CLIENT", fileName: safeName, storageKey: storedKey, mimeType: contentType, size: file.size } }),
+    prisma.caseDocument.create({ data: { caseId, requirementId, supplementaryRequestId: requirement.supplementaryRequestId, uploadedById: user.id, uploadActor: actor, externalSourceNote: externalSourceNote || null, folder: "CLIENT", fileName: safeName, storageKey: storedKey, mimeType: contentType, size: file.size } }),
     prisma.caseDocumentRequirement.update({ where: { id: requirementId }, data: { status: statusAfterRequirementUpload(requirement.status) } }),
     prisma.notification.create({ data: { userId: actor === "CLIENT" ? record.professional.userId : record.clientId, caseId, type: "DOCUMENT_RECEIVED", title: "Document received", message: `${requirement.title} was uploaded by the ${actor.toLowerCase()}.` } }),
   ]) });

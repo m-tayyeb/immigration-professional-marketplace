@@ -67,8 +67,16 @@ enum CaseStatus {
   PREPARING_DOCUMENTS
   FILE_PREPARATION
   FILE_READY_FOR_REVIEW
+  AWAITING_MIGRI
+  DECISION_RECEIVED
   COMPLETED
   CANCELLED
+}
+
+enum MigriDecisionOutcome {
+  POSITIVE
+  NEGATIVE
+  OTHER
 }
 
 enum PaymentStage {
@@ -442,12 +450,14 @@ model CaseDocumentRequirement {
   description String?                   @db.Text
   status      DocumentRequirementStatus @default(REQUESTED)
   active      Boolean                   @default(true)
+  supplementaryRequestId String?
   createdAt   DateTime                  @default(now())
   updatedAt   DateTime                  @updatedAt
   case        Case                      @relation(fields: [caseId], references: [id], onDelete: Cascade)
   documents   CaseDocument[]
 
   @@index([caseId, active, status])
+  @@index([supplementaryRequestId, active, status])
 }
 
 model CaseDocumentCompletion {
@@ -594,6 +604,8 @@ model CaseDocument {
   requirementId      String?
   uploadActor        DocumentUploadActor?
   externalSourceNote String?        @db.Text
+  supplementaryRequestId String?
+  migriDecisionId      String?
   createdAt          DateTime       @default(now())
   case               Case           @relation(fields: [caseId], references: [id], onDelete: Cascade)
   uploadedBy         User           @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
@@ -601,6 +613,57 @@ model CaseDocument {
 
   @@index([caseId, folder])
   @@index([requirementId, createdAt])
+  @@index([supplementaryRequestId, createdAt])
+}
+
+model CaseSubmission {
+  id String @id @default(cuid())
+  caseId String @unique
+  submittedById String
+  submittedAt DateTime @default(now())
+  checklist Json
+  referenceNumber String?
+  note String? @db.Text
+}
+
+model MigriSupplementaryRequest {
+  id String @id @default(cuid())
+  caseId String
+  createdById String
+  receivedAt DateTime?
+  deadline DateTime?
+  note String? @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([caseId, createdAt])
+}
+
+model MigriSupplementaryResponse {
+  id String @id @default(cuid())
+  supplementaryRequestId String @unique
+  submittedById String
+  submittedAt DateTime @default(now())
+  referenceNumber String?
+  note String? @db.Text
+}
+
+model MigriDecision {
+  id String @id @default(cuid())
+  caseId String @unique
+  outcome MigriDecisionOutcome
+  decisionDate DateTime
+  recordedById String
+  recordedAt DateTime @default(now())
+  referenceNumber String?
+  note String? @db.Text
+}
+
+model CaseCompletion {
+  id String @id @default(cuid())
+  caseId String @unique
+  completedById String
+  completedAt DateTime @default(now())
+  closingNote String? @db.Text
 }
 
 model CaseTimelineEvent {

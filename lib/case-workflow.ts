@@ -28,6 +28,8 @@ export const statusLabels: Record<CaseStatus, string> = {
   PREPARING_DOCUMENTS: "Preparing documents",
   FILE_PREPARATION: "File preparation",
   FILE_READY_FOR_REVIEW: "File ready for final review",
+  AWAITING_MIGRI: "Awaiting Migri decision",
+  DECISION_RECEIVED: "Migri decision received",
   COMPLETED: "Completed",
   CANCELLED: "Cancelled",
 };

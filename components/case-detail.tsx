@@ -5,6 +5,7 @@ import { addChecklistItem, addMessage, addTimelineEvent, declineAssessmentReques
 import { CaseAppointmentAgreement } from "./case-appointment-agreement";
 import { ServiceDecision } from "./service-decision";
 import { DocumentCollection } from "./document-collection";
+import { PhaseFivePanel } from "./phase-five-panel";
 import { euros, manualStatusTransitions, nextAction, progressFromChecklist, requestedDocumentsReceivedTitle, statusLabels } from "../lib/case-workflow";
 import { prisma } from "../lib/prisma";
 
@@ -50,6 +51,7 @@ export async function CaseDetail({ caseId, professionalView }: { caseId: string;
   <ServiceDecision caseId={item.id} professionalView={professionalView} status={item.status} clientDecision={item.assessment?.clientDecision ?? null} assessmentReleased={Boolean(item.assessment?.releasedAt)} assessmentPaidAmount={assessmentPaid} totalServiceAmount={totalPrice} agreement={item.serviceDecision}/>
   {item.serviceDecision?.decision === "PROCEED" && <DocumentCollection caseId={item.id} role={session.user.role} requirements={item.documentRequirements} completion={item.documentCompletion} remainingPayment={remaining} fileReadyAt={item.fileReadyAt} canManage={professionalView}/>}
   {(item.fileReadyAt || finalReviewAppointment) && <CaseAppointmentAgreement caseId={item.id} caseStatus={item.status} role={session.user.role} userId={session.user.id} clientId={item.clientId} professionalUserId={item.professional.userId} assessmentPaid={assessment?.status === "PAID"} appointment={finalReviewAppointment} purpose="FINAL_FILE_REVIEW" enabled={Boolean(item.fileReadyAt && remaining?.status === "PAID")}/>}
+  <PhaseFivePanel caseId={item.id} clientView={!professionalView}/>
 
   <Section title="Payments"><PaymentRow label="Assessment payment" payment={assessment} />{remaining ? <PaymentRow label="Remaining payment" payment={remaining} /> : <p className="mt-3 text-sm text-slate-500">No remaining payment has been requested.</p>}{!professionalView && assessmentPaymentAvailable && assessment?.status === "PENDING" && <PayForm caseId={item.id} paymentId={assessment.id} label={`Pay ${euros(assessment.amount)} assessment (mock)`} />}{!professionalView && remaining?.status === "PENDING" && <PayForm caseId={item.id} paymentId={remaining.id} label={`Pay ${euros(remaining.amount)} remaining (mock)`} />}</Section>
 
