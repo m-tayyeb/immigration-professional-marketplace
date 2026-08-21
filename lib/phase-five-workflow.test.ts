@@ -14,8 +14,9 @@ test("supplement cycles are independent and blocked after decision", () => {
   assert.equal(canSubmitSupplementaryResponse({ professional: true, decisionExists: false, alreadySubmitted: false, requirements: [{ active: true, status: "RECEIVED" }] }), false);
 });
 test("decision and completion require authorized, unique predecessor evidence", () => {
-  assert.equal(canRecordMigriDecision({ professional: true, mainSubmitted: true, decisionExists: false }), true);
-  assert.equal(canRecordMigriDecision({ professional: false, mainSubmitted: true, decisionExists: false }), false);
+  assert.equal(canRecordMigriDecision({ professional: true, mainSubmitted: true, decisionExists: false, hasDecisionDocument: true }), true);
+  assert.equal(canRecordMigriDecision({ professional: true, mainSubmitted: true, decisionExists: false, hasDecisionDocument: false }), false);
+  assert.equal(canRecordMigriDecision({ professional: false, mainSubmitted: true, decisionExists: false, hasDecisionDocument: true }), false);
   assert.equal(canCompleteCase({ professional: true, decisionExists: true, completed: false }), true);
   assert.equal(canCompleteCase({ professional: true, decisionExists: false, completed: false }), false);
   assert.equal(canCompleteCase({ professional: true, decisionExists: true, completed: true }), false);

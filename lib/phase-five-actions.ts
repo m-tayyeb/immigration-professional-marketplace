@@ -2,11 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { randomUUID } from "node:crypto";
+import path from "node:path";
 import { auth } from "../auth";
 import { canManageCaseDocuments } from "./document-workflow";
 import { canAddSupplement, canCompleteCase, canRecordMainSubmission, canRecordMigriDecision, canSubmitSupplementaryResponse } from "./phase-five-workflow";
 import { caseAccessWhere } from "./professional-assignment";
 import { prisma } from "./prisma";
+import { documentStorage, storeDocumentWithRollback } from "./document-storage";
 
 async function phaseFiveCase(caseId: string) {
   const session = await auth();
@@ -32,11 +35,22 @@ export async function recordMainSubmission(formData: FormData) {
 
 export async function addMigriSupplementaryRequest(formData: FormData) {
   const caseId = string(formData, "caseId"); const { user, record } = await phaseFiveCase(caseId);
+  const file = formData.get("file");
   const [submission, decision] = await Promise.all([prisma.caseSubmission.findUnique({ where: { caseId } }), prisma.migriDecision.findUnique({ where: { caseId } })]);
   if (!canAddSupplement({ mainSubmitted: Boolean(submission), decisionExists: Boolean(decision) })) throw new Error("Supplementary requests are unavailable after a decision or before submission.");
-  const request = await prisma.migriSupplementaryRequest.create({ data: { caseId, createdById: user.id, receivedAt: string(formData, "receivedAt") ? new Date(string(formData, "receivedAt")) : null, deadline: string(formData, "deadline") ? new Date(string(formData, "deadline")) : null, note: string(formData, "note") || null } });
-  await prisma.notification.create({ data: { userId: record.professional.userId, caseId, type: "MIGRI_SUPPLEMENT", title: "Migri supplementary request", message: "A new Migri request was added for review." } });
+  if (!(file instanceof File) || !file.size || file.size > 10 * 1024 * 1024) throw new Error("Upload the Migri supplementary request document (maximum 10 MB).");
+  const safeName = path.basename(file.name).replace(/[^a-zA-Z0-9._-]/g, "_"); const storageKey = `${caseId}/${randomUUID()}-${safeName}`; const uploadActor = user.role === "CLIENT" ? "CLIENT" as const : "PROFESSIONAL" as const;
+  await storeDocumentWithRollback({ storage: documentStorage(), key: storageKey, contents: Buffer.from(await file.arrayBuffer()), contentType: file.type || "application/octet-stream", commit: (storedKey) => prisma.$transaction(async (tx) => { const request = await tx.migriSupplementaryRequest.create({ data: { caseId, createdById: user.id, deadline: string(formData, "deadline") ? new Date(string(formData, "deadline")) : null, note: string(formData, "note") || null } }); await tx.caseDocument.create({ data: { caseId, supplementaryRequestId: request.id, uploadedById: user.id, uploadActor, folder: "CLIENT", fileName: safeName, storageKey: storedKey, mimeType: file.type || "application/octet-stream", size: file.size } }); await tx.notification.create({ data: { userId: record.professional.userId, caseId, type: "MIGRI_SUPPLEMENT", title: "Migri supplementary request", message: "A new Migri request was added for review." } }); }) });
   refresh(caseId);
+}
+
+export async function uploadMigriDecisionDocument(formData: FormData) {
+  const caseId = string(formData, "caseId"); const { user } = await phaseFiveCase(caseId); const file = formData.get("file");
+  const [submission, decision] = await Promise.all([prisma.caseSubmission.findUnique({ where: { caseId } }), prisma.migriDecision.findUnique({ where: { caseId } })]);
+  if (!submission || decision) throw new Error("A decision document can be reported only after submission and before an official decision.");
+  if (!(file instanceof File) || !file.size || file.size > 10 * 1024 * 1024) throw new Error("Upload the Migri decision document (maximum 10 MB).");
+  const safeName = path.basename(file.name).replace(/[^a-zA-Z0-9._-]/g, "_"); const storageKey = `${caseId}/${randomUUID()}-${safeName}`; const uploadActor = user.role === "CLIENT" ? "CLIENT" as const : "PROFESSIONAL" as const;
+  await storeDocumentWithRollback({ storage: documentStorage(), key: storageKey, contents: Buffer.from(await file.arrayBuffer()), contentType: file.type || "application/octet-stream", commit: (storedKey) => prisma.caseDocument.create({ data: { caseId, uploadedById: user.id, uploadActor, folder: "CLIENT", fileName: safeName, storageKey: storedKey, mimeType: file.type || "application/octet-stream", size: file.size, migriDecisionReport: true } }) }); refresh(caseId);
 }
 
 export async function createSupplementaryRequirement(formData: FormData) {
@@ -54,9 +68,11 @@ export async function submitSupplementaryResponse(formData: FormData) {
 }
 
 export async function recordMigriDecision(formData: FormData) {
-  const caseId = string(formData, "caseId"), outcome = string(formData, "outcome"); const { user, record, professional } = await phaseFiveCase(caseId); const [submission, decision] = await Promise.all([prisma.caseSubmission.findUnique({ where: { caseId } }), prisma.migriDecision.findUnique({ where: { caseId } })]);
-  if (!canRecordMigriDecision({ professional, mainSubmitted: Boolean(submission), decisionExists: Boolean(decision) }) || !["POSITIVE", "NEGATIVE", "OTHER"].includes(outcome)) throw new Error("An authorized professional must record one official decision.");
-  try { await prisma.$transaction([prisma.migriDecision.create({ data: { caseId, outcome: outcome as "POSITIVE" | "NEGATIVE" | "OTHER", decisionDate: new Date(string(formData, "decisionDate")), recordedById: user.id, referenceNumber: string(formData, "referenceNumber") || null, note: string(formData, "note") || null } }), prisma.case.update({ where: { id: caseId }, data: { status: "DECISION_RECEIVED" } }), prisma.caseTimelineEvent.create({ data: { caseId, title: "Official Migri decision recorded" } }), prisma.notification.create({ data: { userId: record.clientId, caseId, type: "MIGRI_DECISION", title: "Migri decision received", message: "Your professional recorded the official Migri decision." } })]); } catch { throw new Error("An official decision has already been recorded."); } refresh(caseId);
+  const caseId = string(formData, "caseId"), outcome = string(formData, "outcome"), decisionDocumentId = string(formData, "decisionDocumentId"); const { user, record, professional } = await phaseFiveCase(caseId); const [submission, decision, document] = await Promise.all([prisma.caseSubmission.findUnique({ where: { caseId } }), prisma.migriDecision.findUnique({ where: { caseId } }), prisma.caseDocument.findFirst({ where: { id: decisionDocumentId, caseId, migriDecisionReport: true, migriDecisionId: null } })]);
+  if (!canRecordMigriDecision({ professional, mainSubmitted: Boolean(submission), decisionExists: Boolean(decision), hasDecisionDocument: Boolean(document) }) || !["POSITIVE", "NEGATIVE", "OTHER"].includes(outcome)) throw new Error("An authorized professional must select an uploaded Migri decision document and record one official decision.");
+  if (!document) throw new Error("Select an uploaded Migri decision document.");
+  const documentId = document.id;
+  try { await prisma.$transaction(async (tx) => { const recorded = await tx.migriDecision.create({ data: { caseId, outcome: outcome as "POSITIVE" | "NEGATIVE" | "OTHER", decisionDate: new Date(), recordedById: user.id, referenceNumber: string(formData, "referenceNumber") || null, note: string(formData, "note") || null } }); await tx.caseDocument.update({ where: { id: documentId }, data: { migriDecisionId: recorded.id } }); await tx.case.update({ where: { id: caseId }, data: { status: "DECISION_RECEIVED" } }); await tx.caseTimelineEvent.create({ data: { caseId, title: "Official Migri decision recorded" } }); await tx.notification.create({ data: { userId: record.clientId, caseId, type: "MIGRI_DECISION", title: "Migri decision received", message: "Your professional recorded the official Migri decision." } }); }); } catch { throw new Error("An official decision has already been recorded."); } refresh(caseId);
 }
 
 export async function completeCaseAfterDecision(formData: FormData) {

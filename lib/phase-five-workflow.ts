@@ -11,8 +11,8 @@ export function canSubmitSupplementaryResponse(input: { professional: boolean; d
   return input.professional && !input.decisionExists && !input.alreadySubmitted && active.length > 0 && active.every((requirement) => requirement.status === "ACCEPTED");
 }
 
-export function canRecordMigriDecision(input: { professional: boolean; mainSubmitted: boolean; decisionExists: boolean }) {
-  return input.professional && input.mainSubmitted && !input.decisionExists;
+export function canRecordMigriDecision(input: { professional: boolean; mainSubmitted: boolean; decisionExists: boolean; hasDecisionDocument: boolean }) {
+  return input.professional && input.mainSubmitted && !input.decisionExists && input.hasDecisionDocument;
 }
 
 export function canCompleteCase(input: { professional: boolean; decisionExists: boolean; completed: boolean }) {

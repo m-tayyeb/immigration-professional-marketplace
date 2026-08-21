@@ -606,6 +606,7 @@ model CaseDocument {
   externalSourceNote String?        @db.Text
   supplementaryRequestId String?
   migriDecisionId      String?
+  migriDecisionReport  Boolean        @default(false)
   createdAt          DateTime       @default(now())
   case               Case           @relation(fields: [caseId], references: [id], onDelete: Cascade)
   uploadedBy         User           @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
