@@ -177,6 +177,7 @@ model User {
   confirmedDocumentCollections CaseDocumentCompletion[] @relation("DocumentCompletionConfirmer")
   documentRemindersSent         CaseDocumentReminder[]   @relation("DocumentReminderSender")
   filesMarkedReady              Case[]                   @relation("FileReadyBy")
+  documentStudioTransferSessions DocumentStudioTransferSession[]
 }
 
 model ClientProfile {
@@ -665,6 +666,36 @@ model CaseCompletion {
   completedById String
   completedAt DateTime @default(now())
   closingNote String? @db.Text
+}
+
+model DocumentStudioTransferSession {
+  id String @id @default(cuid())
+  tokenHash String @unique
+  userId String
+  expiresAt DateTime
+  revokedAt DateTime?
+  consumedAt DateTime?
+  createdAt DateTime @default(now())
+  items DocumentStudioTransferItem[]
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt, revokedAt])
+  @@index([userId])
+}
+
+model DocumentStudioTransferItem {
+  id String @id @default(cuid())
+  sessionId String
+  fileName String
+  mimeType String
+  size Int
+  storageKey String @unique
+  position Int @default(0)
+  consumedAt DateTime?
+  createdAt DateTime @default(now())
+  session DocumentStudioTransferSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, position])
 }
 
 model CaseTimelineEvent {
