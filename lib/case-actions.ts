@@ -11,7 +11,7 @@ import { prisma } from "./prisma";
 import { assessmentRequestFields, canDecideAssessmentRequest, caseContactSnapshot, isCompleteClientContact, parseConsultationMethod, parseOptionalDate } from "./assessment-intake";
 import { assessmentPaymentAllowed } from "./appointment-workflow";
 import { assessmentRequestDecisionStatus, canManuallyTransitionCaseStatus, canPayAssessmentFee, canRequestRemainingPayment, completedChecklistTitleAfterPayment, requestedDocumentsReceivedTitle, statusAfterPayment } from "./case-workflow";
-import { caseAccessWhere, professionalEligibilityWhere, selectProfessionalForAssignment } from "./professional-assignment";
+import { caseAccessWhere, isFinlandMvpOtherAssignment, professionalEligibilityWhere, selectFinlandMvpOtherProfessional, selectProfessionalForAssignment } from "./professional-assignment";
 import { buildDoNotProceedDecisionEvidence, buildProceedDecisionEvidence, canRecordClientDecision, deriveServiceAgreementAmounts, hasFinancialAcknowledgement } from "./service-agreement";
 import { canConfirmDocumentCollection, remainingAmountFromDecision } from "./document-workflow";
 import { documentStorage, storeDocumentWithRollback } from "./document-storage";
@@ -45,19 +45,18 @@ export async function createCase(formData: FormData) {
   const relevantDeadline = parseOptionalDate(formData.get("relevantDeadline"));
   const additionalMessage = String(formData.get("additionalMessage") ?? "").trim();
   if (!serviceId || !countryId || !situationDescription || !preferredConsultationMethod || relevantDeadline === undefined || (matterType === "OTHER" && !matterDescription)) throw new Error("Complete the assessment request intake.");
-  const [client, service, assignableProfessionals] = await Promise.all([
+  const [client, service, country] = await Promise.all([
     prisma.user.findUnique({ where: { id: user.id }, include: { clientProfile: true } }),
     prisma.immigrationService.findFirst({ where: { id: serviceId, active: true } }),
-    prisma.professionalProfile.findMany({
-      where: professionalEligibilityWhere(countryId, serviceId),
-      select: { id: true, createdAt: true, verificationStatus: true, acceptingNewCases: true, countries: { select: { countryId: true } }, services: { select: { serviceId: true } } },
-      orderBy: { createdAt: "asc" },
-    }),
+    prisma.country.findUnique({ where: { id: countryId }, select: { code: true } }),
   ]);
   if (!client || !isCompleteClientContact({ name: client.name, email: client.email, profile: client.clientProfile })) throw new Error("Complete your client contact profile before requesting an assessment.");
   const contactSnapshot = caseContactSnapshot({ name: client.name, email: client.email, profile: client.clientProfile });
-  const professional = selectProfessionalForAssignment(assignableProfessionals, countryId, serviceId);
-  if (!service || !professional) throw new Error("No verified professional is currently available for this selection.");
+  if (!service || !country) redirect("/services?error=unavailable");
+  const otherFinlandMvp = isFinlandMvpOtherAssignment(country.code, service.code);
+  const assignableProfessionals = await prisma.professionalProfile.findMany({ where: otherFinlandMvp ? { verificationStatus: "VERIFIED", acceptingNewCases: true, countries: { some: { countryId } }, user: { email: "anna.laine@example.test" } } : professionalEligibilityWhere(countryId, serviceId), select: { id: true, createdAt: true, verificationStatus: true, acceptingNewCases: true, countries: { select: { countryId: true } }, services: { select: { serviceId: true } }, user: { select: { email: true } } }, orderBy: { createdAt: "asc" } });
+  const professional = otherFinlandMvp ? selectFinlandMvpOtherProfessional(assignableProfessionals, countryId) : selectProfessionalForAssignment(assignableProfessionals, countryId, serviceId);
+  if (!professional) redirect("/services?error=unavailable");
   const created = await prisma.case.create({
     data: {
       clientId: user.id, professionalId: professional.id, countryId, serviceId,

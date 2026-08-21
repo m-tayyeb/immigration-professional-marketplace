@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { formatAppointmentInTimeZone, localAppointmentToUtc } from "./assessment-intake";
+import { formatAppointmentInTimeZone, helsinkiTimeZone, localAppointmentToUtc } from "./assessment-intake";
 import {
   appendAppointmentRevision,
   activeAppointmentForPurpose,
@@ -80,6 +80,7 @@ test("historical awaiting-payment cases without reusable appointments remain com
 });
 
 test("UTC conversion, IANA display, and DST rejection remain enforced", () => {
+  assert.equal(helsinkiTimeZone, "Europe/Helsinki");
   const utc = localAppointmentToUtc("2030-07-02T10:00", "Europe/Helsinki");
   assert.equal(utc?.toISOString(), "2030-07-02T07:00:00.000Z");
   assert.equal(formatAppointmentInTimeZone(utc!, "Europe/Helsinki"), "2030-07-02 10:00 (Europe/Helsinki)");

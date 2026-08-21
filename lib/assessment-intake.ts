@@ -1,6 +1,7 @@
 import type { CaseStatus, ConsultationMethod } from "@prisma/client";
 
 export const consultationMethods = ["ONLINE", "TELEPHONE", "FACE_TO_FACE"] as const;
+export const helsinkiTimeZone = "Europe/Helsinki";
 
 export type ClientContact = {
   name: string;

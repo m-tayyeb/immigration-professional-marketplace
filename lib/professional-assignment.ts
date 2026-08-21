@@ -1,5 +1,5 @@
 export const annaLaineSeedEmail = "anna.laine@example.test";
-export const finlandMvpAssignableServiceCodes = ["FIRST_RESIDENCE_PERMIT", "RESIDENCE_PERMIT_RENEWAL"] as const;
+export const finlandMvpAssignableServiceCodes = ["FIRST_RESIDENCE_PERMIT", "RESIDENCE_PERMIT_RENEWAL", "OTHER"] as const;
 
 export function acceptsNewFinlandMvpCases(email: string) {
   return email.trim().toLowerCase() === annaLaineSeedEmail;
@@ -16,7 +16,12 @@ type AssignmentCandidate = {
   acceptingNewCases: boolean;
   countries: { countryId: string }[];
   services: { serviceId: string }[];
+  user?: { email: string };
 };
+
+export function isFinlandMvpOtherAssignment(countryCode: string | null | undefined, serviceCode: string | null | undefined) {
+  return countryCode === "FI" && serviceCode === "OTHER";
+}
 
 export function professionalEligibilityWhere(countryId: string, serviceId: string) {
   return {
@@ -34,6 +39,10 @@ export function isProfessionalEligibleForAssignment(candidate: AssignmentCandida
     && candidate.services.some((service) => service.serviceId === serviceId);
 }
 
+export function isEligibleFinlandMvpOtherAssignee(candidate: AssignmentCandidate, countryId: string) {
+  return candidate.verificationStatus === "VERIFIED" && candidate.acceptingNewCases && candidate.user?.email.trim().toLowerCase() === annaLaineSeedEmail && candidate.countries.some((country) => country.countryId === countryId);
+}
+
 export function selectProfessionalForAssignment(
   candidates: AssignmentCandidate[],
   countryId: string,
@@ -42,6 +51,10 @@ export function selectProfessionalForAssignment(
   return candidates
     .filter((candidate) => isProfessionalEligibleForAssignment(candidate, countryId, serviceId))
     .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime())[0] ?? null;
+}
+
+export function selectFinlandMvpOtherProfessional(candidates: AssignmentCandidate[], countryId: string) {
+  return candidates.filter((candidate) => isEligibleFinlandMvpOtherAssignee(candidate, countryId)).sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime())[0] ?? null;
 }
 
 export function caseAccessWhere(caseId: string, user: { id: string; role: "CLIENT" | "PROFESSIONAL" | "ADMIN" }) {

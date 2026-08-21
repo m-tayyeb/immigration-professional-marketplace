@@ -4,8 +4,22 @@ import type { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { auth } from "../auth";
-import { appointmentFields, localAppointmentToUtc, parseConsultationMethod, validateAppointmentInput } from "./assessment-intake";
-import { activeAppointmentForPurpose, appointmentConfirmationEffect, canClientManageAppointment, canOfficiallyManageAppointment, canWithdrawAssessment, parseAppointmentPurpose, parseConfirmationSource } from "./appointment-workflow";
+import {
+  appointmentFields,
+  helsinkiTimeZone,
+  localAppointmentToUtc,
+  parseConsultationMethod,
+  validateAppointmentInput,
+} from "./assessment-intake";
+import {
+  activeAppointmentForPurpose,
+  appointmentConfirmationEffect,
+  canClientManageAppointment,
+  canOfficiallyManageAppointment,
+  canWithdrawAssessment,
+  parseAppointmentPurpose,
+  parseConfirmationSource,
+} from "./appointment-workflow";
 import { caseAccessWhere } from "./professional-assignment";
 import { prisma } from "./prisma";
 import { canStartFinalReviewAppointment } from "./document-workflow";
@@ -32,7 +46,7 @@ function assertPurposeGate(record: { status: string; fileReadyAt: Date | null; p
 }
 
 function proposalFromForm(formData: FormData) {
-  const timeZone = String(formData.get("timeZone") ?? "").trim();
+  const timeZone = helsinkiTimeZone;
   const input = {
     method: parseConsultationMethod(formData.get("method")),
     appointmentAtUtc: localAppointmentToUtc(String(formData.get("localDateTime") ?? ""), timeZone),
@@ -40,7 +54,7 @@ function proposalFromForm(formData: FormData) {
     instructions: String(formData.get("instructions") ?? "").trim(),
     professionalMessage: String(formData.get("message") ?? "").trim(),
   };
-  if (!validateAppointmentInput(input)) throw new Error("Enter a valid, unambiguous local appointment time, IANA time zone, method, and instructions.");
+  if (!validateAppointmentInput(input)) throw new Error("Enter a valid, unambiguous Helsinki local appointment time, method, and instructions.");
   return appointmentFields(input);
 }
 

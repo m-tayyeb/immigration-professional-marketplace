@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { acceptsNewFinlandMvpCases, annaLaineSeedEmail, caseAccessWhere, isFinlandMvpAssignableServiceCode, professionalEligibilityWhere, selectProfessionalForAssignment } from "./professional-assignment";
+import { acceptsNewFinlandMvpCases, annaLaineSeedEmail, caseAccessWhere, isFinlandMvpAssignableServiceCode, isFinlandMvpOtherAssignment, professionalEligibilityWhere, selectFinlandMvpOtherProfessional, selectProfessionalForAssignment } from "./professional-assignment";
 
 const createdAt = new Date("2026-01-01T00:00:00.000Z");
-const anna = { id: "anna", createdAt, verificationStatus: "VERIFIED" as const, acceptingNewCases: true, countries: [{ countryId: "finland" }], services: [{ serviceId: "RESIDENCE_PERMIT_RENEWAL" }, { serviceId: "FIRST_RESIDENCE_PERMIT" }] };
+const anna = { id: "anna", createdAt, verificationStatus: "VERIFIED" as const, acceptingNewCases: true, countries: [{ countryId: "finland" }], services: [{ serviceId: "RESIDENCE_PERMIT_RENEWAL" }, { serviceId: "FIRST_RESIDENCE_PERMIT" }], user: { email: annaLaineSeedEmail } };
 const inactiveDummy = { id: "dummy", createdAt: new Date("2025-01-01T00:00:00.000Z"), verificationStatus: "VERIFIED" as const, acceptingNewCases: false, countries: [{ countryId: "finland" }], services: [{ serviceId: "RESIDENCE_PERMIT_RENEWAL" }] };
 
 test("the Finland MVP seed marks only Anna as accepting new cases", () => {
@@ -25,10 +25,10 @@ test("assignment requires the selected service", () => {
   assert.equal(selectProfessionalForAssignment([anna], "finland", "unsupported-service"), null);
 });
 
-test("OTHER is not an assignable Finland MVP service", () => {
+test("OTHER is an assignable Finland MVP service", () => {
   assert.equal(isFinlandMvpAssignableServiceCode("FIRST_RESIDENCE_PERMIT"), true);
   assert.equal(isFinlandMvpAssignableServiceCode("RESIDENCE_PERMIT_RENEWAL"), true);
-  assert.equal(isFinlandMvpAssignableServiceCode("OTHER"), false);
+  assert.equal(isFinlandMvpAssignableServiceCode("OTHER"), true);
 });
 
 test("consultation eligibility rejects inactive professionals and requires exact country and service", () => {
@@ -48,4 +48,12 @@ test("historical professional case access does not depend on current availabilit
     id: "case-1",
     professional: { userId: "dummy-user" },
   });
+});
+
+test("Finland Other routes only to Anna's verified accepting profile", () => {
+  const arbitraryProfessional = { ...anna, id: "other", user: { email: "other@example.test" } };
+  assert.equal(isFinlandMvpOtherAssignment("FI", "OTHER"), true);
+  assert.equal(isFinlandMvpOtherAssignment("SE", "OTHER"), false);
+  assert.equal(selectFinlandMvpOtherProfessional([arbitraryProfessional, anna], "finland")?.id, "anna");
+  assert.equal(selectFinlandMvpOtherProfessional([arbitraryProfessional], "finland"), null);
 });
