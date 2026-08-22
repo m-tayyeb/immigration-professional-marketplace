@@ -1,0 +1,23 @@
+import { detectDocumentEdges, filterScanRgb, isValidScanQuad, mapPerspectivePoint, perspectiveTransform, ScanFilter, ScanQuad, smartScanMaxBytes, smartScanOutputSize } from "./smart-scan";
+
+export async function loadScanImage(file: File) {
+  const url = URL.createObjectURL(file);
+  try { const image = new Image(); image.src = url; await image.decode(); return image; } finally { URL.revokeObjectURL(url); }
+}
+
+export function detectScanQuad(image: HTMLImageElement) {
+  const scale = Math.min(1, 360 / Math.max(image.naturalWidth, image.naturalHeight)); const canvas = document.createElement("canvas"); canvas.width = Math.max(1, Math.round(image.naturalWidth * scale)); canvas.height = Math.max(1, Math.round(image.naturalHeight * scale)); const context = canvas.getContext("2d", { willReadFrequently: true }); if (!context) throw new Error("CANVAS_UNAVAILABLE"); context.drawImage(image, 0, 0, canvas.width, canvas.height); const result = detectDocumentEdges(context.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height); const expand = (point: { x: number; y: number }) => ({ x: point.x / scale, y: point.y / scale }); return { detected: result.detected, quad: { topLeft: expand(result.quad.topLeft), topRight: expand(result.quad.topRight), bottomRight: expand(result.quad.bottomRight), bottomLeft: expand(result.quad.bottomLeft) } };
+}
+
+const distance = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
+export function renderSmartScan(image: HTMLImageElement, quad: ScanQuad, rotation: number, filter: ScanFilter) {
+  if (!isValidScanQuad(quad, image.naturalWidth, image.naturalHeight)) throw new Error("INVALID_PERSPECTIVE");
+  const rawWidth = Math.max(distance(quad.topLeft, quad.topRight), distance(quad.bottomLeft, quad.bottomRight)); const rawHeight = Math.max(distance(quad.topLeft, quad.bottomLeft), distance(quad.topRight, quad.bottomRight)); const fitted = smartScanOutputSize(rawWidth, rawHeight); const source = document.createElement("canvas"); source.width = image.naturalWidth; source.height = image.naturalHeight; const sourceContext = source.getContext("2d", { willReadFrequently: true }); if (!sourceContext) throw new Error("CANVAS_UNAVAILABLE"); sourceContext.drawImage(image, 0, 0); const sourceData = sourceContext.getImageData(0, 0, source.width, source.height); const corrected = document.createElement("canvas"); corrected.width = fitted.width; corrected.height = fitted.height; const correctedContext = corrected.getContext("2d"); if (!correctedContext) throw new Error("CANVAS_UNAVAILABLE"); const output = correctedContext.createImageData(fitted.width, fitted.height); const transform = perspectiveTransform(quad, fitted.width, fitted.height);
+  for (let y = 0; y < fitted.height; y += 1) for (let x = 0; x < fitted.width; x += 1) { const point = mapPerspectivePoint(transform, x, y); const sx = Math.max(0, Math.min(source.width - 1, Math.round(point.x))); const sy = Math.max(0, Math.min(source.height - 1, Math.round(point.y))); const inputIndex = (sy * source.width + sx) * 4; const outputIndex = (y * fitted.width + x) * 4; const [red, green, blue] = filterScanRgb(sourceData.data[inputIndex], sourceData.data[inputIndex + 1], sourceData.data[inputIndex + 2], filter); output.data[outputIndex] = red; output.data[outputIndex + 1] = green; output.data[outputIndex + 2] = blue; output.data[outputIndex + 3] = 255; }
+  correctedContext.putImageData(output, 0, 0); const normalizedRotation = ((rotation % 360) + 360) % 360; if (!normalizedRotation) return corrected; const rotated = document.createElement("canvas"); const sideways = normalizedRotation % 180 !== 0; rotated.width = sideways ? corrected.height : corrected.width; rotated.height = sideways ? corrected.width : corrected.height; const context = rotated.getContext("2d"); if (!context) throw new Error("CANVAS_UNAVAILABLE"); context.translate(rotated.width / 2, rotated.height / 2); context.rotate(normalizedRotation * Math.PI / 180); context.drawImage(corrected, -corrected.width / 2, -corrected.height / 2); return rotated;
+}
+
+function canvasBlob(canvas: HTMLCanvasElement, quality: number) { return new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("ENCODE_FAILED")), "image/jpeg", quality)); }
+export async function encodeSmartScan(canvas: HTMLCanvasElement, name: string) {
+  let blob = await canvasBlob(canvas, .92); for (const quality of [.86, .8, .72]) { if (blob.size <= smartScanMaxBytes) break; blob = await canvasBlob(canvas, quality); } if (blob.size > smartScanMaxBytes) throw new Error("SCAN_TOO_LARGE"); return new File([blob], name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" });
+}
