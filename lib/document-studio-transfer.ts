@@ -28,3 +28,7 @@ export function transferBatchPositions(existing: readonly { position: number }[]
   const start = existing.reduce((maximum, item) => Math.max(maximum, item.position), -1) + 1;
   return Array.from({ length: count }, (_, index) => start + index);
 }
+
+export function existingTransferPage<T extends { position: number; fileName: string }>(items: readonly T[], position: number, fileName: string) {
+  return items.find((item) => item.position === position && item.fileName === fileName) ?? null;
+}

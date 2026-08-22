@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { phoneFileHandling } from "./document-studio";
-import { hashTransferToken, transferBatchPositions, transferFileError, transferIsActive, transferSessionError } from "./document-studio-transfer";
+import { existingTransferPage, hashTransferToken, transferBatchPositions, transferFileError, transferIsActive, transferSessionError } from "./document-studio-transfer";
 
 const now = new Date("2026-01-01T12:00:00Z");
 const activeSession = { expiresAt: new Date("2026-01-01T12:15:00Z"), revokedAt: null, consumedAt: null };
@@ -27,6 +27,18 @@ test("consuming the first item does not invalidate remaining items or the sessio
   assert.equal(items[0].consumedAt instanceof Date, true);
   assert.equal(items[1].consumedAt, null);
   assert.equal(transferIsActive(activeSession, now), true);
+});
+
+test("three sequential uploads share one session and preserve positions", () => {
+  const items = [0, 1, 2].map((position) => ({ id: `page-${position + 1}`, position, fileName: `scan-page-00${position + 1}.jpg`, consumedAt: null }));
+  assert.deepEqual(items.map((item) => item.position), [0, 1, 2]);
+  assert.equal(transferIsActive(activeSession, now), true);
+});
+
+test("retrying a previously uploaded page finds the existing item instead of duplicating it", () => {
+  const item = { id: "page-2", position: 1, fileName: "scan-page-002.jpg", consumedAt: now };
+  assert.equal(existingTransferPage([item], 1, "scan-page-002.jpg"), item);
+  assert.equal(existingTransferPage([item], 2, "scan-page-003.jpg"), null);
 });
 
 test("unsupported phone image MIME types are normalized before upload where possible", () => {
