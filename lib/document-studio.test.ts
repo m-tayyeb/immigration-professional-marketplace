@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { acceptedStudioFiles, evaluatePdfOptimization, hasDocumentStudioEntitlement, invalidateGeneratedPdf, isStudioDocumentType, mergeReceivedItemIds, selectedStudioPdf, shortCaseReference, studioCaseLabel, validateStudioFile } from "./document-studio";
+import { acceptedStudioFiles, evaluatePdfOptimization, hasDocumentStudioEntitlement, invalidateGeneratedPdf, isStudioDocumentType, mergeReceivedItemIds, replaceStudioWorkspaceFile, selectedStudioPdf, shortCaseReference, studioCaseLabel, validateStudioFile } from "./document-studio";
 
 test("Document Studio requires a paid assessment", () => {
   assert.equal(hasDocumentStudioEntitlement([{ stage: "ASSESSMENT", status: "PAID" }]), true);
@@ -55,4 +55,9 @@ test("resetting the input after snapshot does not discard accepted files", () =>
   const pdf = { name: "case.pdf", type: "application/pdf", size: 100 }; const live = { 0: pdf, length: 1 };
   const snapshot = acceptedStudioFiles(live); live.length = 0;
   assert.deepEqual(snapshot, [pdf]);
+});
+test("applying PDF changes replaces one workspace item and preserves its original internally", () => {
+  const original = new File(["original"], "original.pdf", { type: "application/pdf" }); const edited = new File(["edited"], "edited.pdf", { type: "application/pdf" });
+  const result = replaceStudioWorkspaceFile([{ id: "one", file: original }, { id: "two", file: original }], 0, edited);
+  assert.equal(result.length, 2); assert.equal(result[0].file, edited); assert.equal(result[0].originalFile, original); assert.equal(result[1].file, original);
 });

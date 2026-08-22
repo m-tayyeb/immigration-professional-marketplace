@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { phoneFileHandling } from "./document-studio";
-import { existingTransferPage, hashTransferToken, transferBatchPositions, transferFileError, transferIsActive, transferSessionError } from "./document-studio-transfer";
+import { existingTransferPage, hashSignatureTransferToken, hashTransferToken, transferBatchPositions, transferFileError, transferIsActive, transferSessionError } from "./document-studio-transfer";
 
 const now = new Date("2026-01-01T12:00:00Z");
 const activeSession = { expiresAt: new Date("2026-01-01T12:15:00Z"), revokedAt: null, consumedAt: null };
@@ -52,4 +52,11 @@ test("phone batch validation distinguishes unsupported type and oversized files"
   assert.equal(transferFileError({ name: "scan-page-001.jpg", type: "image/jpeg", size: 100 }), null);
   assert.equal(transferFileError({ name: "scan-page-001.gif", type: "image/gif", size: 100 }), "UNSUPPORTED_FILE_TYPE");
   assert.equal(transferFileError({ name: "scan-page-001.jpg", type: "image/jpeg", size: 11 * 1024 * 1024 }), "FILE_TOO_LARGE");
+});
+test("signature QR tokens are isolated from normal document transfer tokens", () => {
+  assert.notEqual(hashSignatureTransferToken("same-token"), hashTransferToken("same-token"));
+});
+test("expired and revoked signature sessions remain inactive", () => {
+  assert.equal(transferIsActive({ expiresAt: new Date(0), revokedAt: null }, now), false);
+  assert.equal(transferIsActive({ expiresAt: new Date("2026-01-01T12:15:00Z"), revokedAt: now }, now), false);
 });

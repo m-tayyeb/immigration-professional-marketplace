@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { movePdfPage, normalizedPlacement, parsePdfPageSelection, removePdfPage } from "./pdf-studio-editor";
+import { dragSignaturePlacement, movePdfPage, normalizedPlacement, parsePdfPageSelection, removePdfPage, resizeSignaturePlacement } from "./pdf-studio-editor";
 
 test("PDF page ranges and individual pages preserve requested order without duplicates", () => {
   assert.deepEqual(parsePdfPageSelection("1-3, 6, 4, 2", 6), [0, 1, 2, 5, 3]);
@@ -13,4 +13,10 @@ test("PDF pages can be removed and reordered without changing the source", () =>
 });
 test("manual text and signature placement is normalized and page-safe", () => {
   assert.deepEqual(normalizedPlacement({ page: 2, xPercent: 125, yPercent: -5, widthPercent: 0 }), { pageIndex: 1, x: 1, y: 0, width: .01 });
+});
+test("drag placement maps visual movement to normalized PDF placement", () => {
+  assert.deepEqual(dragSignaturePlacement({ x: 20, y: 30, width: 25 }, 10, -5), { x: 30, y: 25, width: 25 });
+});
+test("signature resize updates width while respecting the page edge", () => {
+  assert.deepEqual(resizeSignaturePlacement({ x: 70, y: 20, width: 20 }, 20), { x: 70, y: 20, width: 30 });
 });

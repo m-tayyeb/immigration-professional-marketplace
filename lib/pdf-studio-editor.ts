@@ -27,3 +27,11 @@ export function removePdfPage(pages: readonly number[], index: number) {
 export function normalizedPlacement(input: { page: number; xPercent: number; yPercent: number; widthPercent: number }) {
   return { pageIndex: Math.max(0, input.page - 1), x: Math.min(100, Math.max(0, input.xPercent)) / 100, y: Math.min(100, Math.max(0, input.yPercent)) / 100, width: Math.min(100, Math.max(1, input.widthPercent)) / 100 };
 }
+
+export function dragSignaturePlacement(placement: { x: number; y: number; width: number }, deltaXPercent: number, deltaYPercent: number) {
+  return { ...placement, x: Math.min(100 - placement.width, Math.max(0, placement.x + deltaXPercent)), y: Math.min(95, Math.max(0, placement.y + deltaYPercent)) };
+}
+
+export function resizeSignaturePlacement(placement: { x: number; y: number; width: number }, deltaWidthPercent: number) {
+  return { ...placement, width: Math.min(100 - placement.x, Math.max(5, placement.width + deltaWidthPercent)) };
+}

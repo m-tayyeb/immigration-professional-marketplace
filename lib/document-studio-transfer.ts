@@ -3,6 +3,7 @@ import { studioMaxFileSize, validateStudioFile } from "./document-studio";
 
 export const transferLifetimeMs = 15 * 60_000;
 export const hashTransferToken = (token: string) => createHash("sha256").update(token).digest("hex");
+export const hashSignatureTransferToken = (token: string) => hashTransferToken(`signature:${token}`);
 export const newTransferToken = () => randomBytes(32).toString("base64url");
 
 type TransferSession = { expiresAt: Date; revokedAt: Date | null; consumedAt?: Date | null };

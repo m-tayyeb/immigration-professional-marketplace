@@ -21,6 +21,10 @@ export function acceptedStudioFiles<T extends { name: string; type: string; size
   return Array.from(files).filter(validateStudioFile);
 }
 
+export function replaceStudioWorkspaceFile<T extends { file: File; originalFile?: File }>(items: readonly T[], index: number, file: File): (T & { originalFile?: File })[] {
+  return items.map((item, itemIndex) => itemIndex === index ? { ...item, file, originalFile: item.originalFile ?? item.file } : item);
+}
+
 export type PhoneFileHandling = "UPLOAD" | "NORMALIZE_TO_JPEG" | "REJECT";
 export function phoneFileHandling(file: { name: string; type: string }): PhoneFileHandling {
   const mime = file.type.toLowerCase(); const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
