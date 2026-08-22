@@ -605,6 +605,8 @@ model CaseDocument {
   requirementId      String?
   uploadActor        DocumentUploadActor?
   externalSourceNote String?        @db.Text
+  documentType      String?
+  documentName      String?
   supplementaryRequestId String?
   migriDecisionId      String?
   migriDecisionReport  Boolean        @default(false)
