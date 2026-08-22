@@ -17,6 +17,19 @@ export function validateStudioFile(file: { name: string; type: string; size: num
   return Boolean(file.name && file.size > 0 && file.size <= studioMaxFileSize && studioAllowedExtensions.has(extension) && studioAllowedMimeTypes.has(file.type));
 }
 
+export function acceptedStudioFiles<T extends { name: string; type: string; size: number }>(files: ArrayLike<T>) {
+  return Array.from(files).filter(validateStudioFile);
+}
+
+export type PhoneFileHandling = "UPLOAD" | "NORMALIZE_TO_JPEG" | "REJECT";
+export function phoneFileHandling(file: { name: string; type: string }): PhoneFileHandling {
+  const mime = file.type.toLowerCase(); const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+  if (mime === "application/pdf" && extension === "pdf") return "UPLOAD";
+  if (["image/jpeg", "image/png"].includes(mime) && ["jpg", "jpeg", "png"].includes(extension)) return "UPLOAD";
+  if (mime.startsWith("image/") || ["heic", "heif"].includes(extension)) return "NORMALIZE_TO_JPEG";
+  return "REJECT";
+}
+
 export function isStudioDocumentType(value: string): value is (typeof studioDocumentTypes)[number] {
   return studioDocumentTypes.includes(value as (typeof studioDocumentTypes)[number]);
 }

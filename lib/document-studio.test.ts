@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { evaluatePdfOptimization, hasDocumentStudioEntitlement, invalidateGeneratedPdf, isStudioDocumentType, mergeReceivedItemIds, selectedStudioPdf, shortCaseReference, studioCaseLabel, validateStudioFile } from "./document-studio";
+import { acceptedStudioFiles, evaluatePdfOptimization, hasDocumentStudioEntitlement, invalidateGeneratedPdf, isStudioDocumentType, mergeReceivedItemIds, selectedStudioPdf, shortCaseReference, studioCaseLabel, validateStudioFile } from "./document-studio";
 
 test("Document Studio requires a paid assessment", () => {
   assert.equal(hasDocumentStudioEntitlement([{ stage: "ASSESSMENT", status: "PAID" }]), true);
@@ -42,4 +42,17 @@ test("Document Studio accepts only safe PDF and image inputs", () => {
   assert.equal(validateStudioFile({ name: "passport.pdf", type: "application/pdf", size: 100 }), true);
   assert.equal(validateStudioFile({ name: "scan.exe", type: "application/pdf", size: 100 }), false);
   assert.equal(validateStudioFile({ name: "scan.png", type: "image/png", size: 11 * 1024 * 1024 }), false);
+});
+test("a single selected PDF is snapshotted into the workspace", () => {
+  const pdf = { name: "case.pdf", type: "application/pdf", size: 100 };
+  assert.deepEqual(acceptedStudioFiles({ 0: pdf, length: 1 }), [pdf]);
+});
+test("multiple selected PDF, JPG and PNG files are all accepted", () => {
+  const files = [{ name: "case.pdf", type: "application/pdf", size: 100 }, { name: "photo.jpg", type: "image/jpeg", size: 200 }, { name: "scan.png", type: "image/png", size: 300 }];
+  assert.deepEqual(acceptedStudioFiles(files), files);
+});
+test("resetting the input after snapshot does not discard accepted files", () => {
+  const pdf = { name: "case.pdf", type: "application/pdf", size: 100 }; const live = { 0: pdf, length: 1 };
+  const snapshot = acceptedStudioFiles(live); live.length = 0;
+  assert.deepEqual(snapshot, [pdf]);
 });
